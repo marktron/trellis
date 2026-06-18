@@ -1,0 +1,8 @@
+index.db
+index.db-wal
+index.db-shm
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+*.log

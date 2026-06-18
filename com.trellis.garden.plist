@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.trellis.garden</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/mark/Developer/trellis/run-garden.sh</string>
+    </array>
+    <!-- Run nightly at 03:00. If the Mac is asleep, launchd runs it at next wake. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/mark/Developer/trellis/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mark/Developer/trellis/launchd.err.log</string>
+</dict>
+</plist>
