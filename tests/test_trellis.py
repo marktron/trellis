@@ -160,6 +160,15 @@ class TestClassifyTagSuggestions(unittest.TestCase):
             cand_tags=["ai"], vault_tags={"ai"}, own_tags=[])
         self.assertEqual(picked, ["ai"])   # hallucinated "bogus" dropped
 
+    def test_handles_none_inputs(self):
+        # some models emit {"tags": null, "proposed_new": null}; dict.get returns
+        # the stored None (not the default), so the helper must coerce safely.
+        picked, new_tag = t.classify_tag_suggestions(
+            picked_raw=None, proposed_raw=None,
+            cand_tags=["ai"], vault_tags={"ai"}, own_tags=[])
+        self.assertEqual(picked, [])
+        self.assertEqual(new_tag, [])
+
     def test_new_tag_capped_to_one(self):
         _, new_tag = t.classify_tag_suggestions(
             picked_raw=[], proposed_raw=["new-a", "new-b"],

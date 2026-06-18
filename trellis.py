@@ -584,6 +584,10 @@ def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
       - exists in the vault   -> reclassified as a normal pick (NOT 'new'),
       - otherwise             -> a genuine new tag (capped to one).
     """
+    # Some models emit explicit JSON null (e.g. {"proposed_new": null}); dict.get
+    # returns that None rather than the default, so coerce before iterating.
+    picked_raw = picked_raw or []
+    proposed_raw = proposed_raw or []
     cand_set = set(cand_tags)
     own = {t.lower() for t in own_tags}
     vault = {t.lower() for t in vault_tags}
@@ -743,7 +747,7 @@ def cmd_garden(cfg, args):
                 print(f"  link gen failed for {rel}: {str(e)[:120]}", file=sys.stderr)
                 out = {}
             valid_titles = {tt.lower() for tt, _ in cand}
-            for s in out.get("links", [])[:cfg["max_link_suggestions"]]:
+            for s in (out.get("links") or [])[:cfg["max_link_suggestions"]]:
                 title = str(s.get("title", "")).strip()
                 if title.lower() not in valid_titles:
                     continue  # model hallucinated a title not in candidates
