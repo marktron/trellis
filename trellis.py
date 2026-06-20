@@ -607,6 +607,21 @@ def rank_by_centrality(matrix, indices, centroid_vec):
     return [indices[i] for i in np.argsort(-sims)]
 
 
+def coverage_score(centroid_vec, moc_matrix):
+    """Best (row_index, cosine) of the centroid vs MOC embeddings.
+
+    Returns (-1, 0.0) when there are no MOC vectors. moc_matrix rows assumed
+    L2-normalized.
+    """
+    if moc_matrix.shape[0] == 0:
+        return -1, 0.0
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        sims = moc_matrix @ centroid_vec
+    sims = np.nan_to_num(sims, nan=-1.0, posinf=-1.0, neginf=-1.0)
+    j = int(np.argmax(sims))
+    return j, float(sims[j])
+
+
 def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
                              cand_tags: list, vault_tags, own_tags) -> tuple:
     """Split a model's tag response into (existing_picks, genuinely_new).

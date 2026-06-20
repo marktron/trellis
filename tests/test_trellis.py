@@ -316,6 +316,17 @@ class TestClusterHelpers(unittest.TestCase):
         cen = np.array([1.0, 0.0], dtype=np.float32)
         self.assertEqual(t.rank_by_centrality(mat, [0, 1, 2], cen), [0, 2, 1])
 
+    def test_coverage_score_picks_nearest_moc(self):
+        moc = t.l2_normalize(np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32))
+        cen = np.array([1.0, 0.0], dtype=np.float32)
+        j, score = t.coverage_score(cen, moc)
+        self.assertEqual(j, 0)
+        self.assertAlmostEqual(score, 1.0, places=5)
+
+    def test_coverage_score_no_mocs(self):
+        cen = np.array([1.0, 0.0], dtype=np.float32)
+        self.assertEqual(t.coverage_score(cen, np.zeros((0, 2), np.float32)), (-1, 0.0))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
