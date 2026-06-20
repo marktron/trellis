@@ -705,6 +705,37 @@ def render_cluster_report(date_str, summary, candidates):
     return "\n".join(L)
 
 
+def reduce_and_cluster(matrix, params):
+    """UMAP → HDBSCAN. Returns an int label array (-1 = noise).
+
+    umap/hdbscan are imported here (not at module top) so the other commands
+    never pay the heavy import cost and keep working on bare numpy.
+    """
+    import umap
+    import hdbscan
+    reducer = umap.UMAP(
+        n_components=params["umap_components"],
+        n_neighbors=params["umap_neighbors"],
+        min_dist=params["umap_min_dist"],
+        metric="cosine",
+        random_state=params["random_state"],
+    )
+    reduced = reducer.fit_transform(matrix)
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=params["hdbscan_min_cluster_size"],
+        cluster_selection_method="eom",
+    )
+    return clusterer.fit_predict(reduced)
+
+
+def _ensure_cluster_tables(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS moc_candidates (
+                        anchor_path TEXT PRIMARY KEY, theme TEXT, tag TEXT,
+                        member_count INTEGER, nearest_moc TEXT, score REAL,
+                        first_seen REAL, status TEXT DEFAULT 'new')""")
+    conn.commit()
+
+
 def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
                              cand_tags: list, vault_tags, own_tags) -> tuple:
     """Split a model's tag response into (existing_picks, genuinely_new).

@@ -378,5 +378,41 @@ class TestClusterHelpers(unittest.TestCase):
         self.assertIn("No new MOC candidates", md)
 
 
+class TestReduceAndCluster(unittest.TestCase):
+    def setUp(self):
+        try:
+            import umap  # noqa: F401
+            import hdbscan  # noqa: F401
+        except Exception:  # noqa: BLE001
+            self.skipTest("umap/hdbscan not installed")
+
+    def test_finds_separated_blobs(self):
+        rng = np.random.RandomState(0)
+        dim = 50
+        blobs = []
+        for center in (0, 5, 10):
+            base = np.zeros(dim, dtype=np.float32)
+            base[center] = 1.0
+            blobs.append(base + rng.normal(0, 0.05, size=(20, dim)).astype(np.float32))
+        mat = t.l2_normalize(np.vstack(blobs))
+        params = {"umap_components": 2, "umap_neighbors": 10, "umap_min_dist": 0.0,
+                  "hdbscan_min_cluster_size": 5, "random_state": 42}
+        labels = t.reduce_and_cluster(mat, params)
+        self.assertEqual(len(labels), 60)
+        self.assertGreaterEqual(len({int(x) for x in labels if x >= 0}), 2)
+
+
+class TestClusterTables(unittest.TestCase):
+    def test_creates_moc_candidates_table(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        t._ensure_cluster_tables(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(moc_candidates)")}
+        self.assertEqual(
+            cols,
+            {"anchor_path", "theme", "tag", "member_count",
+             "nearest_moc", "score", "first_seen", "status"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
