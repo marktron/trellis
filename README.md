@@ -1,4 +1,4 @@
-# trellis
+# 🌿 Trellis
 
 A local-LLM gardener for an Obsidian vault. Structure for your notes to grow on.
 
