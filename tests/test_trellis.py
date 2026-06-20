@@ -327,6 +327,21 @@ class TestClusterHelpers(unittest.TestCase):
         cen = np.array([1.0, 0.0], dtype=np.float32)
         self.assertEqual(t.coverage_score(cen, np.zeros((0, 2), np.float32)), (-1, 0.0))
 
+    def test_moc_linked_targets_only_from_mocs(self):
+        notes = {
+            "MOCs/Strategy MOC.md": {"title": "Strategy MOC", "out": {"moats"}},
+            "z/moats.md": {"title": "moats", "out": set()},
+            "z/other.md": {"title": "other", "out": {"moats"}},  # not a MOC source
+        }
+        t2r, _ = t.build_link_graph(notes)
+        linked = t.moc_linked_targets(notes, t2r)
+        self.assertIn("z/moats.md", linked)          # linked from the MOC
+        self.assertEqual(len(linked), 1)             # the z/ source doesn't count
+
+    def test_link_coverage_fraction(self):
+        self.assertEqual(t.link_coverage(["a", "b", "c", "d"], {"a", "c"}), 0.5)
+        self.assertEqual(t.link_coverage([], {"a"}), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

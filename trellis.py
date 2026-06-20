@@ -622,6 +622,26 @@ def coverage_score(centroid_vec, moc_matrix):
     return j, float(sims[j])
 
 
+def moc_linked_targets(notes, title_to_rel):
+    """Set of rel paths that are wikilink targets from any note under MOCs/."""
+    linked = set()
+    for rel, n in notes.items():
+        if not rel.startswith("MOCs"):
+            continue
+        for tgt in n["out"]:
+            dest = title_to_rel.get(tgt)
+            if dest:
+                linked.add(dest)
+    return linked
+
+
+def link_coverage(member_paths, moc_linked):
+    """Fraction of member_paths already linked from some MOC (0.0 if empty)."""
+    if not member_paths:
+        return 0.0
+    return sum(1 for p in member_paths if p in moc_linked) / len(member_paths)
+
+
 def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
                              cand_tags: list, vault_tags, own_tags) -> tuple:
     """Split a model's tag response into (existing_picks, genuinely_new).
