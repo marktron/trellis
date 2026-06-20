@@ -642,6 +642,11 @@ def link_coverage(member_paths, moc_linked):
     return sum(1 for p in member_paths if p in moc_linked) / len(member_paths)
 
 
+def filter_unseen(candidates, seen_anchors):
+    """Drop candidates whose anchor path is already in seen_anchors."""
+    return [c for c in candidates if c["anchor"] not in seen_anchors]
+
+
 def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
                              cand_tags: list, vault_tags, own_tags) -> tuple:
     """Split a model's tag response into (existing_picks, genuinely_new).

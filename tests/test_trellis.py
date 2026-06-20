@@ -342,6 +342,11 @@ class TestClusterHelpers(unittest.TestCase):
         self.assertEqual(t.link_coverage(["a", "b", "c", "d"], {"a", "c"}), 0.5)
         self.assertEqual(t.link_coverage([], {"a"}), 0.0)
 
+    def test_filter_unseen_drops_known_anchors(self):
+        cands = [{"anchor": "z/a.md"}, {"anchor": "z/b.md"}, {"anchor": "z/c.md"}]
+        out = t.filter_unseen(cands, {"z/b.md"})
+        self.assertEqual([c["anchor"] for c in out], ["z/a.md", "z/c.md"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
