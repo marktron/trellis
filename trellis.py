@@ -647,6 +647,15 @@ def filter_unseen(candidates, seen_anchors):
     return [c for c in candidates if c["anchor"] not in seen_anchors]
 
 
+def normalize_tag(tag):
+    """Normalize a suggested tag to vault convention: lowercase, no leading '#',
+    spaces/underscores → hyphens, nested '/' preserved."""
+    if not tag:
+        return ""
+    t = re.sub(r"[\s_]+", "-", tag.strip().lstrip("#").strip().lower())
+    return re.sub(r"-{2,}", "-", t).strip("-")
+
+
 CLUSTER_NAME_PROMPT = """You organize a Zettelkasten into topic maps (MOCs). \
 Below is a cluster of related notes found by semantic similarity. Name the single \
 coherent theme they share, in a few words suitable as a MOC title.
@@ -1075,7 +1084,7 @@ def cmd_cluster(cfg, args):
             print(f"  naming failed for {c['anchor']}: {str(e)[:120]}", file=sys.stderr)
             out = {}
         c["theme"] = str(out.get("theme") or (c["top_tags"][0] if c["top_tags"] else "Untitled theme")).strip()
-        c["tag"] = str(out.get("suggested_tag") or (c["top_tags"][0] if c["top_tags"] else "")).strip()
+        c["tag"] = normalize_tag(str(out.get("suggested_tag") or (c["top_tags"][0] if c["top_tags"] else "")))
         c["rationale"] = str(out.get("rationale") or "").strip()[:120]
         print(f"  candidate: {c['theme']}  ({c['member_count']} notes)", flush=True)
 

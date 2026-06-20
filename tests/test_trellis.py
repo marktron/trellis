@@ -377,6 +377,24 @@ class TestClusterHelpers(unittest.TestCase):
             "2026-06-19", {"clusters": 0, "candidates": 0, "covered": 0}, [])
         self.assertIn("No new MOC candidates", md)
 
+    def test_normalize_tag_strips_hash_and_lowercases(self):
+        self.assertEqual(t.normalize_tag("#Structural-Racism"), "structural-racism")
+
+    def test_normalize_tag_spaces_and_underscores_to_hyphens(self):
+        self.assertEqual(t.normalize_tag("slow_travel_philosophy"), "slow-travel-philosophy")
+        self.assertEqual(t.normalize_tag("Product Management"), "product-management")
+
+    def test_normalize_tag_preserves_nested_slash(self):
+        self.assertEqual(t.normalize_tag("Product Management/Discovery"),
+                         "product-management/discovery")
+
+    def test_normalize_tag_collapses_and_trims_hyphens(self):
+        self.assertEqual(t.normalize_tag("  # foo __ bar  "), "foo-bar")
+
+    def test_normalize_tag_empty_and_none(self):
+        self.assertEqual(t.normalize_tag(""), "")
+        self.assertEqual(t.normalize_tag(None), "")
+
 
 class TestReduceAndCluster(unittest.TestCase):
     def setUp(self):
