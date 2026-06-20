@@ -141,10 +141,11 @@ python3 trellis.py migrate --apply    # write the changes
 python3 trellis.py migrate --scope z/ # limit to path prefixes
 ```
 
-It only touches a note when the `Added by Claude` marker is followed *purely* by
-a `[[wikilink]]` list. Any note where that marker has prose or mixed content is
-**skipped and reported** for manual review, so unrelated notes that happen to use
-the same header aren't rewritten. Run `index --rebuild` afterward.
+It's block-precise: it converts only `Added by Claude` blocks that are a
+`[[wikilink]]` list. Prose blocks under that marker are left exactly as-is — even
+when a note has both a prose block and a link block. Notes that still carry a
+manual prose block are reported so you can eyeball them. Run `index --rebuild`
+afterward.
 
 ### Auto-MOC detection
 

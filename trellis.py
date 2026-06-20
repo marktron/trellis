@@ -165,28 +165,10 @@ def strip_trellis_blocks(text: str) -> str:
     return _TRELLIS_BLOCK_RE.sub("", text)
 
 
+# Detects a legacy "Added by Claude on <date>:" marker line. Used only to REPORT
+# prose blocks left untouched by migration — migration itself keys on
+# _TRELLIS_BLOCK_RE, which matches only marker + [[wikilink]]-list blocks.
 _LEGACY_MARKER_RE = re.compile(r"^Added by Claude on [^\n]*:[ \t]*$", re.MULTILINE)
-_LINK_BULLET_RE = re.compile(r"^[ \t]*-[ \t]*\[\[[^\]\n]+\]\][ \t]*$")
-
-
-def legacy_blocks_pure(content: str) -> bool:
-    """True if every legacy 'Added by Claude on <date>:' block is ONLY a list of
-    [[wikilink]] bullets — i.e. safe to migrate. False if any such marker is
-    followed by prose, mixed content, or no links at all (leave those for a human).
-    """
-    lines = content.splitlines()
-    for i, line in enumerate(lines):
-        if not _LEGACY_MARKER_RE.match(line):
-            continue
-        j, saw_link = i + 1, False
-        while j < len(lines) and lines[j].strip():        # until blank line / EOF
-            if not _LINK_BULLET_RE.match(lines[j]):
-                return False                              # non-link content
-            saw_link = True
-            j += 1
-        if not saw_link:
-            return False                                  # marker with no links
-    return True
 
 
 def l2_normalize(mat: np.ndarray) -> np.ndarray:
@@ -1392,7 +1374,7 @@ def cmd_migrate(cfg, args):
     vault = cfg["vault"]
     scope = tuple(args.scope.split(",")) if args.scope else None
     exclude = set(cfg["exclude_dirs"])
-    converted, skipped = [], []
+    converted, prose_left = [], []
     for full, rel in iter_markdown(vault, exclude):
         if scope and not rel.startswith(scope):
             continue
@@ -1400,28 +1382,28 @@ def cmd_migrate(cfg, args):
         if raw is None:
             continue
         text = raw.decode("utf-8", "replace")
-        if not _LEGACY_MARKER_RE.search(text):
-            continue                                  # no legacy block here
-        if not legacy_blocks_pure(text):
-            skipped.append(rel)                       # has non-link content; leave it
-            continue
-        new = consolidate_connected(text, [])
-        if new == text:
-            continue
-        if args.apply:
-            with open(full, "w", encoding="utf-8") as fh:
-                fh.write(new)
-        converted.append(rel)
+        # Block-precise: convert only marker + [[link]]-list blocks. Prose blocks
+        # under an "Added by Claude" marker don't match _TRELLIS_BLOCK_RE and are
+        # left exactly as-is, even when they sit in the same note as a link block.
+        after = consolidate_connected(text, []) if _TRELLIS_BLOCK_RE.search(text) else text
+        if after != text:
+            if args.apply:
+                with open(full, "w", encoding="utf-8") as fh:
+                    fh.write(after)
+            converted.append(rel)
+        if _LEGACY_MARKER_RE.search(after):
+            prose_left.append(rel)                    # a manual prose marker remains
 
     head = "migrated" if args.apply else "DRY RUN — would migrate"
     print(f"{head}: {len(converted)} note(s) -> single '{CONNECTED_HEADER}' section")
     for rel in converted:
         print(f"  ✓ {rel}")
-    if skipped:
-        print(f"\nskipped {len(skipped)} note(s) — 'Added by Claude' marker with "
-              f"non-link content (review by hand):")
-        for rel in skipped:
-            print(f"  ! {rel}")
+    if prose_left:
+        print(f"\nleft {len(prose_left)} note(s) with a manual 'Added by Claude' prose "
+              f"block untouched (some may also appear above — their link block "
+              f"was still converted):")
+        for rel in prose_left:
+            print(f"  · {rel}")
     if not args.apply:
         print("\nnothing written. Re-run with --apply to write these changes.")
     return 0

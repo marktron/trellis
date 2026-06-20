@@ -500,29 +500,20 @@ class TestTrellisBlocks(unittest.TestCase):
         out = t.consolidate_connected(self.NEW, ["Alpha"])       # already present
         self.assertEqual(out.count("- [[Alpha]]"), 1)
 
-    def test_legacy_pure_link_list(self):
-        self.assertTrue(t.legacy_blocks_pure(self.LEGACY))
-        self.assertTrue(t.legacy_blocks_pure(self.TWO_LEGACY))
-
-    def test_legacy_impure_prose_is_unsafe(self):
-        prose = "body\n\nAdded by Claude on 2026-01-01:\nSome prose paragraph.\n"
-        self.assertFalse(t.legacy_blocks_pure(prose))
-
-    def test_legacy_impure_mixed_is_unsafe(self):
-        mixed = "body\n\nAdded by Claude on 2026-01-01:\n- [[A]]\nand a note to self\n"
-        self.assertFalse(t.legacy_blocks_pure(mixed))
-
-    def test_legacy_marker_without_links_is_unsafe(self):
-        bare = "body\n\nAdded by Claude on 2026-01-01:\n\nmore prose\n"
-        self.assertFalse(t.legacy_blocks_pure(bare))
-
-    def test_legacy_pure_when_no_marker(self):
-        self.assertTrue(t.legacy_blocks_pure("just content with [[a link]]"))
-
-    def test_legacy_one_pure_one_impure_is_unsafe(self):
-        m = ("Added by Claude on 2026-01-01:\n- [[A]]\n\n"
-             "Added by Claude on 2026-02-02:\nprose here\n")
-        self.assertFalse(t.legacy_blocks_pure(m))
+    def test_consolidate_is_block_precise(self):
+        # a note with a manual prose "Added by Claude" block AND a real link block:
+        # migrate the link block, leave the prose block untouched.
+        content = ("Body.\n\nAdded by Claude on 2026-01-01:\n\n## Manual prose\n"
+                   "A paragraph of my own notes.\n\n"
+                   "Added by Claude on 2026-06-17:\n- [[Alpha]]\n- [[Beta]]\n")
+        out = t.consolidate_connected(content, [])
+        self.assertIn("## Manual prose", out)                    # prose preserved
+        self.assertIn("A paragraph of my own notes.", out)
+        self.assertIn("Added by Claude on 2026-01-01", out)      # prose marker stays
+        self.assertIn("### Connected notes added by Trellis", out)
+        self.assertIn("- [[Alpha]]", out)
+        self.assertIn("- [[Beta]]", out)
+        self.assertNotIn("Added by Claude on 2026-06-17", out)   # link marker converted
 
 
 if __name__ == "__main__":
