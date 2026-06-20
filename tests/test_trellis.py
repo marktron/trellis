@@ -347,6 +347,36 @@ class TestClusterHelpers(unittest.TestCase):
         out = t.filter_unseen(cands, {"z/b.md"})
         self.assertEqual([c["anchor"] for c in out], ["z/a.md", "z/c.md"])
 
+    def test_naming_prompt_includes_tags_and_titles(self):
+        p = t.build_cluster_naming_prompt(["health", "aging"], ["Sleep and aging", "VO2max"])
+        self.assertIn("health, aging", p)
+        self.assertIn("Sleep and aging", p)
+        self.assertIn("VO2max", p)
+        self.assertIn("theme", p)          # asks for the JSON theme field
+
+    def _sample_candidate(self):
+        return {"anchor": "z/sleep.md", "theme": "Sleep & Aging", "tag": "aging/sleep",
+                "rationale": "sleep quality declines with age", "member_count": 9,
+                "link_coverage": 0.0, "nearest_moc": ("Active Aging & Longevity MOC", 0.41),
+                "repr_titles": ["Sleep and aging", "Deep sleep"],
+                "member_titles": ["Sleep and aging", "Deep sleep", "Naps"]}
+
+    def test_render_report_includes_candidate_and_moc_line(self):
+        md = t.render_cluster_report(
+            "2026-06-19", {"clusters": 5, "candidates": 1, "covered": 4},
+            [self._sample_candidate()])
+        self.assertIn("# MOC candidates — 2026-06-19", md)
+        self.assertIn("## Sleep & Aging", md)
+        self.assertIn("`aging/sleep`", md)
+        self.assertIn("/moc Sleep & Aging", md)
+        self.assertIn("[[Sleep and aging]]", md)
+        self.assertIn("Active Aging & Longevity MOC", md)
+
+    def test_render_cluster_report_empty(self):
+        md = t.render_cluster_report(
+            "2026-06-19", {"clusters": 0, "candidates": 0, "covered": 0}, [])
+        self.assertIn("No new MOC candidates", md)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

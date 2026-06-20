@@ -647,6 +647,64 @@ def filter_unseen(candidates, seen_anchors):
     return [c for c in candidates if c["anchor"] not in seen_anchors]
 
 
+CLUSTER_NAME_PROMPT = """You organize a Zettelkasten into topic maps (MOCs). \
+Below is a cluster of related notes found by semantic similarity. Name the single \
+coherent theme they share, in a few words suitable as a MOC title.
+
+COMMON TAGS: {tags}
+
+REPRESENTATIVE NOTES:
+{titles}
+
+Return JSON only:
+{{"theme": "<short title>", "suggested_tag": "<one lowercase tag, nested ok>", "rationale": "<8 words max>"}}"""
+
+
+def build_cluster_naming_prompt(top_tags, repr_titles):
+    tags = ", ".join(top_tags) if top_tags else "(none)"
+    titles = "\n".join(f"- {x}" for x in repr_titles)
+    return CLUSTER_NAME_PROMPT.format(tags=tags, titles=titles)
+
+
+def render_cluster_report(date_str, summary, candidates):
+    """Render the MOC-candidate review as markdown. Pure (no I/O) for testing."""
+    L = [f"# MOC candidates — {date_str}", ""]
+    L.append(f"_{summary['clusters']} cluster(s) found · "
+             f"{summary['candidates']} new candidate(s) · "
+             f"{summary['covered']} already covered._")
+    L.append("")
+    if not candidates:
+        L.append("_No new MOC candidates this run._")
+        return "\n".join(L)
+    L.append("> Each candidate is a dense theme with no covering MOC. "
+             "Run the suggested `/moc` line for any worth building.")
+    L.append("")
+    for c in candidates:
+        L.append(f"## {c['theme']}")
+        L.append(f"- suggested tag: `{c['tag']}`")
+        L.append(f"- {c['rationale']}")
+        if c.get("nearest_moc"):
+            title, score = c["nearest_moc"]
+            L.append(f"- nearest existing MOC: [[{title}]] (sim {score:.2f})")
+        L.append(f"- {c['member_count']} notes · "
+                 f"{c['link_coverage'] * 100:.0f}% already linked from a MOC")
+        L.append("")
+        L.append("Representative notes:")
+        for title in c["repr_titles"]:
+            L.append(f"- [[{title}]]")
+        L.append("")
+        L.append(f"`/moc {c['theme']}`")
+        L.append("")
+        L.append("<details><summary>All members</summary>")
+        L.append("")
+        for title in c["member_titles"]:
+            L.append(f"- [[{title}]]")
+        L.append("")
+        L.append("</details>")
+        L.append("")
+    return "\n".join(L)
+
+
 def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
                              cand_tags: list, vault_tags, own_tags) -> tuple:
     """Split a model's tag response into (existing_picks, genuinely_new).
