@@ -165,6 +165,30 @@ def strip_trellis_blocks(text: str) -> str:
     return _TRELLIS_BLOCK_RE.sub("", text)
 
 
+_LEGACY_MARKER_RE = re.compile(r"^Added by Claude on [^\n]*:[ \t]*$", re.MULTILINE)
+_LINK_BULLET_RE = re.compile(r"^[ \t]*-[ \t]*\[\[[^\]\n]+\]\][ \t]*$")
+
+
+def legacy_blocks_pure(content: str) -> bool:
+    """True if every legacy 'Added by Claude on <date>:' block is ONLY a list of
+    [[wikilink]] bullets — i.e. safe to migrate. False if any such marker is
+    followed by prose, mixed content, or no links at all (leave those for a human).
+    """
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        if not _LEGACY_MARKER_RE.match(line):
+            continue
+        j, saw_link = i + 1, False
+        while j < len(lines) and lines[j].strip():        # until blank line / EOF
+            if not _LINK_BULLET_RE.match(lines[j]):
+                return False                              # non-link content
+            saw_link = True
+            j += 1
+        if not saw_link:
+            return False                                  # marker with no links
+    return True
+
+
 def l2_normalize(mat: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
@@ -1360,6 +1384,50 @@ def cmd_apply(cfg, args):
 
 
 # --------------------------------------------------------------------------- #
+# Migrate: legacy "Added by Claude on <date>:" link blocks -> one section
+# --------------------------------------------------------------------------- #
+def cmd_migrate(cfg, args):
+    if not _require_vault(cfg):
+        return 1
+    vault = cfg["vault"]
+    scope = tuple(args.scope.split(",")) if args.scope else None
+    exclude = set(cfg["exclude_dirs"])
+    converted, skipped = [], []
+    for full, rel in iter_markdown(vault, exclude):
+        if scope and not rel.startswith(scope):
+            continue
+        raw = read_note(full)
+        if raw is None:
+            continue
+        text = raw.decode("utf-8", "replace")
+        if not _LEGACY_MARKER_RE.search(text):
+            continue                                  # no legacy block here
+        if not legacy_blocks_pure(text):
+            skipped.append(rel)                       # has non-link content; leave it
+            continue
+        new = consolidate_connected(text, [])
+        if new == text:
+            continue
+        if args.apply:
+            with open(full, "w", encoding="utf-8") as fh:
+                fh.write(new)
+        converted.append(rel)
+
+    head = "migrated" if args.apply else "DRY RUN — would migrate"
+    print(f"{head}: {len(converted)} note(s) -> single '{CONNECTED_HEADER}' section")
+    for rel in converted:
+        print(f"  ✓ {rel}")
+    if skipped:
+        print(f"\nskipped {len(skipped)} note(s) — 'Added by Claude' marker with "
+              f"non-link content (review by hand):")
+        for rel in skipped:
+            print(f"  ! {rel}")
+    if not args.apply:
+        print("\nnothing written. Re-run with --apply to write these changes.")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def main(argv=None):
@@ -1407,6 +1475,12 @@ def main(argv=None):
     pcl.add_argument("--dry-run", action="store_true",
                      help="print report; write nothing (no ledger, no file)")
 
+    pm = sub.add_parser(
+        "migrate",
+        help="convert legacy 'Added by Claude on <date>:' link blocks to one Connected-notes section")
+    pm.add_argument("--scope", help="comma-separated path prefixes (default: whole vault)")
+    pm.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
+
     args = p.parse_args(argv)
     cfg = load_config({"vault": args.vault, "embed_model": args.embed_model,
                        "db_path": args.db_path,
@@ -1414,7 +1488,7 @@ def main(argv=None):
     return {
         "index": cmd_index, "search": cmd_search,
         "neighbors": cmd_neighbors, "status": cmd_status, "garden": cmd_garden,
-        "apply": cmd_apply, "cluster": cmd_cluster,
+        "apply": cmd_apply, "cluster": cmd_cluster, "migrate": cmd_migrate,
     }[args.cmd](cfg, args)
 
 

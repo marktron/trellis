@@ -500,6 +500,30 @@ class TestTrellisBlocks(unittest.TestCase):
         out = t.consolidate_connected(self.NEW, ["Alpha"])       # already present
         self.assertEqual(out.count("- [[Alpha]]"), 1)
 
+    def test_legacy_pure_link_list(self):
+        self.assertTrue(t.legacy_blocks_pure(self.LEGACY))
+        self.assertTrue(t.legacy_blocks_pure(self.TWO_LEGACY))
+
+    def test_legacy_impure_prose_is_unsafe(self):
+        prose = "body\n\nAdded by Claude on 2026-01-01:\nSome prose paragraph.\n"
+        self.assertFalse(t.legacy_blocks_pure(prose))
+
+    def test_legacy_impure_mixed_is_unsafe(self):
+        mixed = "body\n\nAdded by Claude on 2026-01-01:\n- [[A]]\nand a note to self\n"
+        self.assertFalse(t.legacy_blocks_pure(mixed))
+
+    def test_legacy_marker_without_links_is_unsafe(self):
+        bare = "body\n\nAdded by Claude on 2026-01-01:\n\nmore prose\n"
+        self.assertFalse(t.legacy_blocks_pure(bare))
+
+    def test_legacy_pure_when_no_marker(self):
+        self.assertTrue(t.legacy_blocks_pure("just content with [[a link]]"))
+
+    def test_legacy_one_pure_one_impure_is_unsafe(self):
+        m = ("Added by Claude on 2026-01-01:\n- [[A]]\n\n"
+             "Added by Claude on 2026-02-02:\nprose here\n")
+        self.assertFalse(t.legacy_blocks_pure(m))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
