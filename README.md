@@ -5,34 +5,34 @@ A local-LLM gardener for an Obsidian vault. Structure for your notes to grow on.
 Everything runs locally against [Ollama](https://ollama.com). No note ever leaves
 the machine.
 
-## Roadmap
+## Features
 
-- **Phase 1 — index + search** *(done)*: an incremental embedding index over
-  the vault, plus semantic search and per-note neighbor lookup.
-- **Phase 2 — nightly gardener** *(done)*: link suggestions (embeddings for
-  recall → small model for precision), tag suggestions for thin notes
-  (controlled vocabulary), orphan detection. Emits a dated, checkbox review
-  queue to `_claude-output/gardener/` — never edits notes directly.
-- **Phase 2b — apply step** *(done)*: read back the checked boxes in a review
-  file and apply approved tags/links to notes (links append to the body; tags
-  fold into frontmatter via the vault's idempotent `migrate_tags`).
-- **Phase 3 — auto-MOC detection** *(done)*: cluster `z/` (UMAP → HDBSCAN),
-  test each cluster against existing MOCs (centroid vs. MOC embeddings, plus
-  how much is already MOC-linked), name the uncovered ones with the local gen
-  model, and emit a dated candidate report to `_claude-output/clusters/` with a
-  ready-to-run `/moc` line each.
+- **Index + search** — an incremental embedding index over the vault, plus
+  semantic search and per-note neighbor lookup.
+- **Nightly gardener** — link suggestions (embeddings for recall → small model
+  for precision), tag suggestions for thin notes (controlled vocabulary), and
+  orphan detection. Emits a dated, checkbox review queue to
+  `_claude-output/gardener/` — never edits notes directly.
+- **Apply step** — read back the checked boxes in a review file and apply
+  approved tags/links to notes (links append to the body; tags fold into
+  frontmatter via the vault's idempotent `migrate_tags`).
+- **Auto-MOC detection** — cluster `z/` (UMAP → HDBSCAN), test each cluster
+  against existing MOCs (centroid vs. MOC embeddings, plus how much is already
+  MOC-linked), name the uncovered ones with the local gen model, and emit a
+  dated candidate report to `_claude-output/clusters/` with a ready-to-run
+  `/moc` line each.
 
 ## Requirements
 
-- Python 3.11+ with `numpy` (`pip install numpy`). Phases 1–2 are otherwise
-  standard library only.
+- Python 3.11+ with `numpy` (`pip install numpy`). The core commands (`index`,
+  `search`, `garden`) are otherwise standard library only.
 - Ollama running with an embedding model pulled:
 
   ```sh
   ollama pull qwen3-embedding:0.6b
   ```
 
-- **Phase 3 (clustering) only** needs extra libraries in a venv:
+- **Clustering (`cluster`) only** needs extra libraries in a venv:
 
   ```sh
   python3 -m venv .venv
@@ -65,7 +65,7 @@ python3 trellis.py neighbors "Dichotomy of Control"   # related-note preview
 python3 trellis.py status
 ```
 
-### Gardener (Phase 2)
+### Gardener
 
 ```sh
 python3 trellis.py garden                  # tend up to `garden_limit` notes -> dated review queue
@@ -80,8 +80,8 @@ Two ledgers in the DB make repeat runs cheap and quiet: `garden_state` skips
 notes unchanged since they were last gardened, and `suggestions` prevents
 re-surfacing an idea you've already seen. Notes are processed
 most-disconnected-first, so orphans get attention before well-linked notes.
-**Nothing is ever written to your notes** — the (future) apply step will read
-back the checked boxes.
+**Nothing is ever written to your notes** — the `apply` step (below) reads back
+the checked boxes.
 
 ### Nightly scheduler (launchd)
 
@@ -100,7 +100,7 @@ launchctl kickstart -k gui/$(id -u)/com.trellis.garden   # optional: run once no
 Requires the Ollama app to be running (it autostarts at login). Output is logged
 to `garden.log`. To stop: `launchctl bootout gui/$(id -u)/com.trellis.garden`.
 
-### Applying a review (Phase 2b)
+### Applying a review
 
 After checking the boxes you want in a review file (and editing tag lists / links
 freely — the apply step reads the file as edited, not the original suggestions):
@@ -123,7 +123,7 @@ deleted), and the archived file is the only human-readable record of suggestions
 you *declined* (the seen-ledger keeps those from re-appearing). Use `--dry-run`
 to apply nothing and leave the file in place.
 
-### Auto-MOC detection (Phase 3)
+### Auto-MOC detection
 
 Finds dense thematic clusters in `z/` that no MOC covers yet, and writes them as
 candidates you can build with the `/moc` skill. Requires the venv (see
@@ -169,11 +169,11 @@ Configuration lives in `trellis.toml`; CLI flags override it.
 ## Model notes
 
 - **Embeddings:** `qwen3-embedding:0.6b` — 32K context (no truncation on long
-  notes/MOCs), strong MTEB for its size. Bump to `:4b` if recall disappoints;
-  this machine has the headroom. `embeddinggemma` is the smaller-footprint
+  notes/MOCs), strong MTEB for its size. Bump to `:4b` if recall disappoints and
+  you have the memory headroom. `embeddinggemma` is the smaller-footprint
   alternative (2K context).
-- **Generation/judgment (Phase 2):** `qwen3.6:35b-a3b` (fast MoE) or
-  `gemma4` — both already pulled locally.
+- **Generation/judgment:** `qwen3.6:35b-a3b` (fast MoE) or `gemma4` — pull
+  whichever you prefer with `ollama pull`.
 
 ## Tests
 
