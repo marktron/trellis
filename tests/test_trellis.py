@@ -293,5 +293,14 @@ class TestGeneratePayload(unittest.TestCase):
             t._post = orig
 
 
+class TestClusterHelpers(unittest.TestCase):
+    def test_cluster_members_groups_and_drops_noise(self):
+        labels = [0, 1, 0, -1, 1, 1]
+        out = t.cluster_members(labels)
+        self.assertEqual(out[0], [0, 2])
+        self.assertEqual(out[1], [1, 4, 5])
+        self.assertNotIn(-1, out)   # noise dropped
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

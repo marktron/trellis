@@ -581,6 +581,17 @@ def candidate_tags(neighbor_tag_lists: list[list[str]], own_tags: set[str],
     return ranked[:top_n]
 
 
+def cluster_members(labels):
+    """Map each non-noise cluster label to its member row indices (-1 = noise)."""
+    out = {}
+    for i, lab in enumerate(labels):
+        lab = int(lab)
+        if lab < 0:
+            continue
+        out.setdefault(lab, []).append(i)
+    return out
+
+
 def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
                              cand_tags: list, vault_tags, own_tags) -> tuple:
     """Split a model's tag response into (existing_picks, genuinely_new).
