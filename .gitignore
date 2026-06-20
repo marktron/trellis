@@ -4,5 +4,6 @@ index.db-shm
 __pycache__/
 *.pyc
 .venv/
+trellis.toml
 .DS_Store
 *.log

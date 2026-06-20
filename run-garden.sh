@@ -2,8 +2,9 @@
 # Nightly trellis run: refresh the embedding index, then garden.
 # Invoked by com.trellis.garden launchd agent. Ollama must be running.
 
-PY=/Users/mark/Developer/trellis/.venv/bin/python3
-DIR=/Users/mark/Developer/trellis
+# Resolve this script's own directory so there are no hardcoded user paths.
+DIR=${0:A:h}
+PY="$DIR/.venv/bin/python3"
 LOG="$DIR/garden.log"
 
 echo "===== run $(date '+%Y-%m-%d %H:%M:%S') =====" >> "$LOG"

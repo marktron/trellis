@@ -908,11 +908,11 @@ git commit -m "feat: cmd_cluster orchestration + cluster CLI"
 
 - [ ] **Step 1: Update `run-garden.sh` to use the venv python**
 
-Replace the hardcoded `/Library/Frameworks/Python.framework/Versions/3.12/bin/python3` invocation with `~/Developer/trellis/.venv/bin/python3` (expand to the absolute `/Users/mark/Developer/trellis/.venv/bin/python3`). Leave the index-then-garden sequence unchanged.
+Replace the hardcoded `/Library/Frameworks/Python.framework/Versions/3.12/bin/python3` invocation with `~/Developer/trellis/.venv/bin/python3` (expand to the absolute `~/Developer/trellis/.venv/bin/python3`). Leave the index-then-garden sequence unchanged.
 
 - [ ] **Step 2: Update `com.trellis.garden.plist`**
 
-Change the `ProgramArguments` python path to `/Users/mark/Developer/trellis/.venv/bin/python3`. (No new schedule for `cluster` — it stays manual per the spec.)
+Change the `ProgramArguments` python path to `~/Developer/trellis/.venv/bin/python3`. (No new schedule for `cluster` — it stays manual per the spec.)
 
 - [ ] **Step 3: Add a Phase 3 section to `README.md`**
 

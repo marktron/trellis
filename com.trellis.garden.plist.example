@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Copy to ~/Library/LaunchAgents/com.trellis.garden.plist and replace
+     /path/to/trellis with the absolute path to your trellis checkout
+     (launchd does not expand ~ or environment variables). -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -8,7 +11,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/zsh</string>
-        <string>/Users/mark/Developer/trellis/run-garden.sh</string>
+        <string>/path/to/trellis/run-garden.sh</string>
     </array>
     <!-- Run nightly at 03:00. If the Mac is asleep, launchd runs it at next wake. -->
     <key>StartCalendarInterval</key>
@@ -21,8 +24,8 @@
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>/Users/mark/Developer/trellis/launchd.out.log</string>
+    <string>/path/to/trellis/launchd.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/mark/Developer/trellis/launchd.err.log</string>
+    <string>/path/to/trellis/launchd.err.log</string>
 </dict>
 </plist>

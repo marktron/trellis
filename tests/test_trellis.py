@@ -1,5 +1,5 @@
 """Unit tests for trellis pure helpers. Run with:
-    python3 /Users/mark/Developer/trellis/tests/test_trellis.py
+    python3 tests/test_trellis.py        (from the repo root)
 """
 import os
 import sys

@@ -33,7 +33,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # Config
 # --------------------------------------------------------------------------- #
 DEFAULTS = {
-    "vault": "/Users/mark/Library/Mobile Documents/iCloud~md~obsidian/Documents/Mark's vault",
+    # Set your vault path in trellis.toml (copy trellis.toml.example) or via the
+    # TRELLIS_VAULT environment variable.
+    "vault": os.environ.get("TRELLIS_VAULT", ""),
     "embed_model": "qwen3-embedding:0.6b",
     "db_path": os.path.join(HERE, "index.db"),
     "ollama_url": "http://localhost:11434",
@@ -313,12 +315,21 @@ def read_note(full_path: str) -> bytes | None:
 # --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
+def _require_vault(cfg) -> bool:
+    """True if the configured vault exists; else print a helpful error."""
+    if not (cfg.get("vault") and os.path.isdir(cfg["vault"])):
+        print("error: vault not set or not found. Copy trellis.toml.example to "
+              "trellis.toml and set `vault` (or set the TRELLIS_VAULT env var).",
+              file=sys.stderr)
+        return False
+    return True
+
+
 def cmd_index(cfg, args):
     vault = cfg["vault"]
     model = cfg["embed_model"]
     exclude = set(cfg["exclude_dirs"])
-    if not os.path.isdir(vault):
-        print(f"error: vault not found: {vault}", file=sys.stderr)
+    if not _require_vault(cfg):
         return 1
 
     conn = connect(cfg["db_path"])
@@ -860,6 +871,8 @@ def _scan_vault(vault, exclude, max_chars):
 
 
 def cmd_garden(cfg, args):
+    if not _require_vault(cfg):
+        return 1
     vault = cfg["vault"]
     scope = tuple(args.scope.split(",")) if args.scope else tuple(cfg["garden_scope"])
     gen_model = cfg["gen_model"]
@@ -1008,6 +1021,8 @@ def cmd_garden(cfg, args):
 # Cluster (phase 3): detect MOC-candidate clusters -> review report
 # --------------------------------------------------------------------------- #
 def cmd_cluster(cfg, args):
+    if not _require_vault(cfg):
+        return 1
     vault = cfg["vault"]
     scope = tuple(args.scope.split(",")) if args.scope else tuple(cfg["cluster_scope"])
     gen_model = cfg["gen_model"]
@@ -1200,6 +1215,8 @@ def _archive_review(path: str) -> str | None:
 
 
 def cmd_apply(cfg, args):
+    if not _require_vault(cfg):
+        return 1
     path = args.file
     if not os.path.exists(path):
         alt = os.path.join(cfg["vault"], "_claude-output", "gardener", path)

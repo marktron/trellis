@@ -24,8 +24,8 @@ the machine.
 
 ## Requirements
 
-- Python 3.11+ with `numpy` (already present on this machine; otherwise
-  `pip install numpy`). Phases 1–2 are otherwise standard library only.
+- Python 3.11+ with `numpy` (`pip install numpy`). Phases 1–2 are otherwise
+  standard library only.
 - Ollama running with an embedding model pulled:
 
   ```sh
@@ -42,6 +42,18 @@ the machine.
   `umap`/`hdbscan` are imported lazily, so the other commands keep working on
   bare system-python + numpy. Run any command via `.venv/bin/python3` once the
   venv exists.
+
+## Configuration
+
+Copy the example config and point it at your vault:
+
+```sh
+cp trellis.toml.example trellis.toml
+# then edit `vault` (and `exclude_dirs` / `*_scope` for your folder layout)
+```
+
+`trellis.toml` is gitignored — your paths stay local. CLI flags override the
+file, and you can set the vault out-of-band with `TRELLIS_VAULT=/path/to/vault`.
 
 ## Usage
 
@@ -73,11 +85,14 @@ back the checked boxes.
 
 ### Nightly scheduler (launchd)
 
-`run-garden.sh` refreshes the index then gardens; `com.trellis.garden.plist`
-runs it nightly at 03:00. Install:
+`run-garden.sh` refreshes the index then gardens (it locates itself, so no
+paths to edit); `com.trellis.garden.plist.example` runs it nightly at 03:00.
+Copy the example, replace `/path/to/trellis` with your checkout's absolute path
+(launchd doesn't expand `~`), then load it:
 
 ```sh
-cp ~/Developer/trellis/com.trellis.garden.plist ~/Library/LaunchAgents/
+sed "s|/path/to/trellis|$PWD|g" com.trellis.garden.plist.example \
+  > ~/Library/LaunchAgents/com.trellis.garden.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.trellis.garden.plist
 launchctl kickstart -k gui/$(id -u)/com.trellis.garden   # optional: run once now
 ```
