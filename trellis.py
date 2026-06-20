@@ -62,6 +62,7 @@ DEFAULTS = {
     "umap_min_dist": 0.0,            # UMAP min_dist (0 = tightest clusters)
     "hdbscan_min_cluster_size": 8,   # smallest group worth a MOC
     "cover_sim_threshold": 0.60,     # centroid≥this to an MOC embedding ⇒ covered
+    "moc_link_cover_threshold": 0.70,  # ≥this fraction already MOC-linked ⇒ covered
     "cluster_repr_notes": 8,         # representative notes shown per candidate
     "random_state": 42,              # seed UMAP for run-to-run stability
 }
@@ -642,6 +643,12 @@ def link_coverage(member_paths, moc_linked):
     return sum(1 for p in member_paths if p in moc_linked) / len(member_paths)
 
 
+def is_covered(sim_score, link_cov, sim_threshold, link_threshold):
+    """A cluster is already covered if an MOC is semantically close OR most of
+    its notes are already linked from some MOC (structural coverage)."""
+    return sim_score >= sim_threshold or link_cov >= link_threshold
+
+
 def filter_unseen(candidates, seen_anchors):
     """Drop candidates whose anchor path is already in seen_anchors."""
     return [c for c in candidates if c["anchor"] not in seen_anchors]
@@ -1050,12 +1057,14 @@ def cmd_cluster(cfg, args):
         anchor_rel = paths[ranked[0]]
 
         j, score = coverage_score(cen, moc_mat)
-        if score >= cfg["cover_sim_threshold"]:
+        member_paths = [paths[i] for i in members]
+        link_cov = link_coverage(member_paths, moc_linked)
+        if is_covered(score, link_cov, cfg["cover_sim_threshold"],
+                      cfg["moc_link_cover_threshold"]):
             covered += 1
             continue                                          # an MOC already covers it
         nearest = (titles[moc_idx[j]], score) if j >= 0 else None
 
-        member_paths = [paths[i] for i in members]
         member_titles = [titles[i] for i in ranked]
         repr_titles = member_titles[:cfg["cluster_repr_notes"]]
         top_tags = candidate_tags([notes.get(p, {}).get("tags", []) for p in member_paths],
@@ -1063,7 +1072,7 @@ def cmd_cluster(cfg, args):
 
         candidates.append({
             "anchor": anchor_rel, "theme": "", "tag": "", "rationale": "",
-            "member_count": len(members), "link_coverage": link_coverage(member_paths, moc_linked),
+            "member_count": len(members), "link_coverage": link_cov,
             "nearest_moc": nearest, "repr_titles": repr_titles, "member_titles": member_titles,
             "top_tags": top_tags,
         })

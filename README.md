@@ -127,15 +127,17 @@ shows its LLM-named theme, a suggested tag, the nearest existing MOC (with
 similarity) and how much of the cluster is already MOC-linked, representative and
 full member lists, and a ready-to-run `/moc <theme>` line. The `moc_candidates`
 ledger keeps repeat runs quiet — and once you actually build a MOC for a theme,
-the coverage test drops that cluster automatically on the next run. `cluster` is
-manual (not part of the nightly job); themes don't shift fast enough to warrant
-nightly runs. The two dials worth tuning are `cover_sim_threshold` and
-`hdbscan_min_cluster_size`.
+the coverage test drops that cluster automatically on the next run. A cluster
+counts as covered if it's semantically close to an MOC (`cover_sim_threshold`)
+**or** most of its notes are already linked from one (`moc_link_cover_threshold`).
+`cluster` is manual (not part of the nightly job); themes don't shift fast enough
+to warrant nightly runs. The dials worth tuning are `cover_sim_threshold`,
+`moc_link_cover_threshold`, and `hdbscan_min_cluster_size`.
 
 Optional convenience alias:
 
 ```sh
-alias trellis='python3 ~/Developer/trellis/trellis.py'
+alias trellis='~/Developer/trellis/.venv/bin/python3 ~/Developer/trellis/trellis.py'
 ```
 
 ## How it works

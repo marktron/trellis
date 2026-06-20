@@ -395,6 +395,20 @@ class TestClusterHelpers(unittest.TestCase):
         self.assertEqual(t.normalize_tag(""), "")
         self.assertEqual(t.normalize_tag(None), "")
 
+    def test_is_covered_semantic_gate(self):
+        self.assertTrue(t.is_covered(0.65, 0.0, 0.60, 0.70))
+
+    def test_is_covered_link_gate(self):
+        # low semantic sim, but most members already linked from an MOC
+        self.assertTrue(t.is_covered(0.47, 0.85, 0.60, 0.70))
+
+    def test_is_covered_neither(self):
+        self.assertFalse(t.is_covered(0.30, 0.10, 0.60, 0.70))
+
+    def test_is_covered_boundaries_inclusive(self):
+        self.assertTrue(t.is_covered(0.60, 0.0, 0.60, 0.70))   # sim == threshold
+        self.assertTrue(t.is_covered(0.0, 0.70, 0.60, 0.70))   # link == threshold
+
 
 class TestReduceAndCluster(unittest.TestCase):
     def setUp(self):

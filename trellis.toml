@@ -38,5 +38,6 @@ umap_neighbors           = 15
 umap_min_dist            = 0.0
 hdbscan_min_cluster_size = 8
 cover_sim_threshold      = 0.60   # provisional; tune after first run
+moc_link_cover_threshold = 0.70   # >=this fraction already MOC-linked => covered
 cluster_repr_notes       = 8
 random_state             = 42
