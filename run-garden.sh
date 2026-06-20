@@ -2,7 +2,7 @@
 # Nightly trellis run: refresh the embedding index, then garden.
 # Invoked by com.trellis.garden launchd agent. Ollama must be running.
 
-PY=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+PY=/Users/mark/Developer/trellis/.venv/bin/python3
 DIR=/Users/mark/Developer/trellis
 LOG="$DIR/garden.log"
 

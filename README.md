@@ -16,19 +16,32 @@ the machine.
 - **Phase 2b — apply step** *(done)*: read back the checked boxes in a review
   file and apply approved tags/links to notes (links append to the body; tags
   fold into frontmatter via the vault's idempotent `migrate_tags`).
-- **Phase 3 — auto-MOC detection** *(next)*: cluster the index (HDBSCAN), find
-  dense thematic groups with no covering MOC, hand candidates to the `/moc`
-  skill.
+- **Phase 3 — auto-MOC detection** *(done)*: cluster `z/` (UMAP → HDBSCAN),
+  test each cluster against existing MOCs (centroid vs. MOC embeddings, plus
+  how much is already MOC-linked), name the uncovered ones with the local gen
+  model, and emit a dated candidate report to `_claude-output/clusters/` with a
+  ready-to-run `/moc` line each.
 
 ## Requirements
 
 - Python 3.11+ with `numpy` (already present on this machine; otherwise
-  `pip install numpy`). Everything else is the standard library.
+  `pip install numpy`). Phases 1–2 are otherwise standard library only.
 - Ollama running with an embedding model pulled:
 
   ```sh
   ollama pull qwen3-embedding:0.6b
   ```
+
+- **Phase 3 (clustering) only** needs extra libraries in a venv:
+
+  ```sh
+  python3 -m venv .venv
+  .venv/bin/python3 -m pip install -r requirements.txt   # numpy, scikit-learn, umap-learn, hdbscan
+  ```
+
+  `umap`/`hdbscan` are imported lazily, so the other commands keep working on
+  bare system-python + numpy. Run any command via `.venv/bin/python3` once the
+  venv exists.
 
 ## Usage
 
@@ -94,6 +107,30 @@ even if nothing was checked — so running `apply` on a file always retires it a
 deleted), and the archived file is the only human-readable record of suggestions
 you *declined* (the seen-ledger keeps those from re-appearing). Use `--dry-run`
 to apply nothing and leave the file in place.
+
+### Auto-MOC detection (Phase 3)
+
+Finds dense thematic clusters in `z/` that no MOC covers yet, and writes them as
+candidates you can build with the `/moc` skill. Requires the venv (see
+Requirements above).
+
+```sh
+.venv/bin/python3 trellis.py cluster              # detect candidates -> review report
+.venv/bin/python3 trellis.py cluster --dry-run    # print the report, write nothing
+.venv/bin/python3 trellis.py cluster --limit 10   # cap candidates named/reported this run
+.venv/bin/python3 trellis.py cluster --scope z/,Areas  # restrict to path prefixes
+.venv/bin/python3 trellis.py cluster --force      # ignore the seen-ledger
+```
+
+Reports land in `<vault>/_claude-output/clusters/YYYY-MM-DD.md`. Each candidate
+shows its LLM-named theme, a suggested tag, the nearest existing MOC (with
+similarity) and how much of the cluster is already MOC-linked, representative and
+full member lists, and a ready-to-run `/moc <theme>` line. The `moc_candidates`
+ledger keeps repeat runs quiet — and once you actually build a MOC for a theme,
+the coverage test drops that cluster automatically on the next run. `cluster` is
+manual (not part of the nightly job); themes don't shift fast enough to warrant
+nightly runs. The two dials worth tuning are `cover_sim_threshold` and
+`hdbscan_min_cluster_size`.
 
 Optional convenience alias:
 
