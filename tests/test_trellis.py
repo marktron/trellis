@@ -301,6 +301,21 @@ class TestClusterHelpers(unittest.TestCase):
         self.assertEqual(out[1], [1, 4, 5])
         self.assertNotIn(-1, out)   # noise dropped
 
+    def test_centroid_is_normalized_mean(self):
+        mat = t.l2_normalize(np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32))
+        c = t.centroid(mat, [0, 1])
+        self.assertAlmostEqual(float(np.linalg.norm(c)), 1.0, places=5)
+        self.assertAlmostEqual(float(c[0]), float(c[1]), places=5)  # symmetric
+
+    def test_rank_by_centrality_orders_by_cosine(self):
+        mat = t.l2_normalize(np.array([
+            [1.0, 0.0],   # 0 — on axis
+            [0.0, 1.0],   # 1 — orthogonal
+            [0.9, 0.1],   # 2 — near axis
+        ], dtype=np.float32))
+        cen = np.array([1.0, 0.0], dtype=np.float32)
+        self.assertEqual(t.rank_by_centrality(mat, [0, 1, 2], cen), [0, 2, 1])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

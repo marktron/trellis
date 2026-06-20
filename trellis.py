@@ -592,6 +592,21 @@ def cluster_members(labels):
     return out
 
 
+def centroid(matrix, indices):
+    """L2-normalized mean of the given rows (rows assumed already normalized)."""
+    c = matrix[indices].mean(axis=0)
+    n = np.linalg.norm(c)
+    return (c / n if n else c).astype(np.float32)
+
+
+def rank_by_centrality(matrix, indices, centroid_vec):
+    """Return `indices` sorted by descending cosine similarity to centroid_vec."""
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        sims = matrix[indices] @ centroid_vec
+    sims = np.nan_to_num(sims, nan=-1.0, posinf=-1.0, neginf=-1.0)
+    return [indices[i] for i in np.argsort(-sims)]
+
+
 def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
                              cand_tags: list, vault_tags, own_tags) -> tuple:
     """Split a model's tag response into (existing_picks, genuinely_new).
