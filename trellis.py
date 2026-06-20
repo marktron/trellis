@@ -55,6 +55,15 @@ DEFAULTS = {
     "max_link_suggestions": 5,         # cap accepted links per note
     "tag_thin_threshold": 1,           # suggest tags only when a note has <= this many
     "tag_candidate_neighbors": 15,     # neighbors whose tags form the candidate vocab
+    # --- auto-MOC clustering (phase 3) ---
+    "cluster_scope": ["z/"],          # path prefixes clustered for MOC candidates
+    "umap_components": 5,             # UMAP target dimensionality
+    "umap_neighbors": 15,            # UMAP n_neighbors
+    "umap_min_dist": 0.0,            # UMAP min_dist (0 = tightest clusters)
+    "hdbscan_min_cluster_size": 8,   # smallest group worth a MOC
+    "cover_sim_threshold": 0.60,     # centroid≥this to an MOC embedding ⇒ covered
+    "cluster_repr_notes": 8,         # representative notes shown per candidate
+    "random_state": 42,              # seed UMAP for run-to-run stability
 }
 
 # qwen3-embedding works best with a task instruction on the QUERY side only.

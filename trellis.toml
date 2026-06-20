@@ -30,3 +30,13 @@ link_candidates      = 8         # semantic neighbors considered per note
 max_link_suggestions = 5         # cap accepted links per note
 tag_thin_threshold   = 2         # suggest tags only when a note has <= this many
 tag_candidate_neighbors = 15     # neighbors whose tags form the candidate vocabulary
+
+# --- auto-MOC clustering (phase 3) ---
+cluster_scope            = ["z/"]
+umap_components          = 5
+umap_neighbors           = 15
+umap_min_dist            = 0.0
+hdbscan_min_cluster_size = 8
+cover_sim_threshold      = 0.60   # provisional; tune after first run
+cluster_repr_notes       = 8
+random_state             = 42
