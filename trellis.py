@@ -989,6 +989,125 @@ def cmd_garden(cfg, args):
 
 
 # --------------------------------------------------------------------------- #
+# Cluster (phase 3): detect MOC-candidate clusters -> review report
+# --------------------------------------------------------------------------- #
+def cmd_cluster(cfg, args):
+    vault = cfg["vault"]
+    scope = tuple(args.scope.split(",")) if args.scope else tuple(cfg["cluster_scope"])
+    gen_model = cfg["gen_model"]
+    limit = args.limit if args.limit is not None else 0
+
+    conn = connect(cfg["db_path"])
+    _ensure_cluster_tables(conn)
+    paths, titles, mat = _load_matrix(conn)
+    if not paths:
+        print("index is empty — run:  python3 trellis.py index", file=sys.stderr)
+        return 1
+
+    # Notes to cluster (scope) and MOC vectors (coverage reference).
+    cl_idx = [i for i, p in enumerate(paths) if p.startswith(scope)]
+    moc_idx = [i for i, p in enumerate(paths) if p.startswith("MOCs")]
+    if len(cl_idx) < cfg["hdbscan_min_cluster_size"]:
+        print(f"too few notes in scope {scope} to cluster", file=sys.stderr)
+        return 1
+    sub = mat[cl_idx]
+    moc_mat = mat[moc_idx] if moc_idx else np.zeros((0, mat.shape[1]), np.float32)
+
+    print(f"clustering {len(cl_idx)} notes in scope {scope}…", flush=True)
+    labels = reduce_and_cluster(sub, {
+        "umap_components": cfg["umap_components"],
+        "umap_neighbors": cfg["umap_neighbors"],
+        "umap_min_dist": cfg["umap_min_dist"],
+        "hdbscan_min_cluster_size": cfg["hdbscan_min_cluster_size"],
+        "random_state": cfg["random_state"],
+    })
+    groups = cluster_members(labels)   # sub-index -> members (sub indices)
+
+    # Vault scan for tags + MOC link coverage.
+    print("scanning vault for tags + MOC links…", flush=True)
+    notes = _scan_vault(vault, set(cfg["exclude_dirs"]), cfg["max_chars"])
+    title_to_rel, _ = build_link_graph(notes)
+    moc_linked = moc_linked_targets(notes, title_to_rel)
+
+    seen_anchors = {row[0] for row in
+                    conn.execute("SELECT anchor_path FROM moc_candidates").fetchall()}
+    now = time.time()
+    candidates, covered = [], 0
+
+    for lab, sub_members in sorted(groups.items()):
+        members = [cl_idx[m] for m in sub_members]            # back to global indices
+        cen = centroid(mat, members)
+        ranked = rank_by_centrality(mat, members, cen)        # global indices
+        anchor_rel = paths[ranked[0]]
+
+        j, score = coverage_score(cen, moc_mat)
+        if score >= cfg["cover_sim_threshold"]:
+            covered += 1
+            continue                                          # an MOC already covers it
+        nearest = (titles[moc_idx[j]], score) if j >= 0 else None
+
+        member_paths = [paths[i] for i in members]
+        member_titles = [titles[i] for i in ranked]
+        repr_titles = member_titles[:cfg["cluster_repr_notes"]]
+        top_tags = candidate_tags([notes.get(p, {}).get("tags", []) for p in member_paths],
+                                  set(), 6)
+
+        candidates.append({
+            "anchor": anchor_rel, "theme": "", "tag": "", "rationale": "",
+            "member_count": len(members), "link_coverage": link_coverage(member_paths, moc_linked),
+            "nearest_moc": nearest, "repr_titles": repr_titles, "member_titles": member_titles,
+            "top_tags": top_tags,
+        })
+
+    # Only-new (unless --force), then optional cap.
+    if not args.force:
+        candidates = filter_unseen(candidates, seen_anchors)
+    if limit:
+        candidates = candidates[:limit]
+
+    # Name each candidate with the gen model (fallback: top tag).
+    for c in candidates:
+        prompt = build_cluster_naming_prompt(c["top_tags"], c["repr_titles"])
+        try:
+            out = generate_json(prompt, gen_model, cfg["ollama_url"],
+                                timeout=cfg["gen_timeout"], num_predict=cfg["gen_num_predict"])
+        except OllamaError as e:
+            print(f"  naming failed for {c['anchor']}: {str(e)[:120]}", file=sys.stderr)
+            out = {}
+        c["theme"] = str(out.get("theme") or (c["top_tags"][0] if c["top_tags"] else "Untitled theme")).strip()
+        c["tag"] = str(out.get("suggested_tag") or (c["top_tags"][0] if c["top_tags"] else "")).strip()
+        c["rationale"] = str(out.get("rationale") or "").strip()[:120]
+        print(f"  candidate: {c['theme']}  ({c['member_count']} notes)", flush=True)
+
+    date_str = datetime.date.today().isoformat()
+    summary = {"clusters": len(groups), "candidates": len(candidates), "covered": covered}
+    report = render_cluster_report(date_str, summary, candidates)
+
+    if args.dry_run:
+        print("\n--- DRY RUN (report not written) ---\n")
+        print(report)
+        return 0
+
+    for c in candidates:
+        nm = c["nearest_moc"][0] if c["nearest_moc"] else None
+        sc = c["nearest_moc"][1] if c["nearest_moc"] else 0.0
+        conn.execute("INSERT OR IGNORE INTO moc_candidates VALUES(?,?,?,?,?,?,?,?)",
+                     (c["anchor"], c["theme"], c["tag"], c["member_count"], nm, sc, now, "new"))
+    conn.commit()
+
+    out_dir = os.path.join(vault, "_claude-output", "clusters")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{date_str}.md")
+    if os.path.exists(out_path):
+        out_path = os.path.join(out_dir, f"{date_str}-{time.strftime('%H%M')}.md")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(report)
+    print(f"\nMOC candidates → {out_path}")
+    print(f"  {len(candidates)} new candidate(s) · {covered} covered · {len(groups)} cluster(s)")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # Apply (phase 2b): write checked review items back into notes
 # --------------------------------------------------------------------------- #
 _CHECK_LINK_RE = re.compile(r"^-\s+\[[xX]\]\s+link\s*→\s*\[\[(.+?)\]\]")
@@ -1205,6 +1324,14 @@ def main(argv=None):
     pa.add_argument("--dry-run", action="store_true",
                     help="show what would change; write nothing")
 
+    pcl = sub.add_parser("cluster", help="detect MOC-candidate clusters -> review report")
+    pcl.add_argument("--scope", help="comma-separated path prefixes (default: z/)")
+    pcl.add_argument("--limit", type=int, help="max candidates to name/report (0 = no cap)")
+    pcl.add_argument("--gen-model", dest="gen_model", help="judgment model for naming")
+    pcl.add_argument("--force", action="store_true", help="ignore the seen-ledger")
+    pcl.add_argument("--dry-run", action="store_true",
+                     help="print report; write nothing (no ledger, no file)")
+
     args = p.parse_args(argv)
     cfg = load_config({"vault": args.vault, "embed_model": args.embed_model,
                        "db_path": args.db_path,
@@ -1212,7 +1339,7 @@ def main(argv=None):
     return {
         "index": cmd_index, "search": cmd_search,
         "neighbors": cmd_neighbors, "status": cmd_status, "garden": cmd_garden,
-        "apply": cmd_apply,
+        "apply": cmd_apply, "cluster": cmd_cluster,
     }[args.cmd](cfg, args)
 
 
