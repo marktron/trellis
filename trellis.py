@@ -146,6 +146,25 @@ def build_embed_text(title: str, tags: list[str], body: str, max_chars: int) -> 
     return ("\n\n".join(p for p in parts if p))[:max_chars]
 
 
+CONNECTED_HEADER = "### Connected notes added by Trellis"
+
+# Matches trellis's own appended link blocks — the current section header and the
+# legacy "Added by Claude on <date>:" form — plus their bullet lists and any blank
+# lines in front. Used to keep these out of embeddings/eligibility hashes and to
+# consolidate them into one section.
+_TRELLIS_BLOCK_RE = re.compile(
+    r"\n*^(?:###[ \t]+Connected notes added by Trellis[ \t]*"
+    r"|Added by Claude on [^\n]*:)[ \t]*\n"
+    r"(?P<links>(?:[ \t]*-[ \t]*\[\[[^\]\n]+\]\][^\n]*\n?)+)",
+    re.MULTILINE)
+
+
+def strip_trellis_blocks(text: str) -> str:
+    """Remove trellis's own appended link blocks so they never pollute an
+    embedding or trigger re-gardening (both header forms)."""
+    return _TRELLIS_BLOCK_RE.sub("", text)
+
+
 def l2_normalize(mat: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
@@ -368,7 +387,7 @@ def cmd_index(cfg, args):
             text = raw.decode("utf-8", errors="replace")
         fm, body = split_frontmatter(text)
         title = os.path.splitext(os.path.basename(rel))[0]
-        et = build_embed_text(title, extract_tags(fm), body, cfg["max_chars"])
+        et = build_embed_text(title, extract_tags(fm), strip_trellis_blocks(body), cfg["max_chars"])
         pending.append((rel, title, h, os.path.getmtime(full), et))
 
     # Delete rows for files removed from the vault.
@@ -865,7 +884,9 @@ def _scan_vault(vault, exclude, max_chars):
             "tags": extract_tags(fm),
             "out": parse_outlinks(body),
             "excerpt": " ".join(body.split()),
-            "hash": content_hash(raw),
+            # Hash the note WITHOUT trellis's own appended blocks, so applying
+            # links doesn't re-trigger gardening on an otherwise-unchanged note.
+            "hash": content_hash(strip_trellis_blocks(text).encode("utf-8")),
         }
     return notes
 
@@ -1214,6 +1235,29 @@ def _archive_review(path: str) -> str | None:
         return None
 
 
+def consolidate_connected(content: str, new_targets) -> str:
+    """Fold new link targets into a single Connected-notes section, absorbing any
+    existing section and legacy 'Added by Claude' blocks (deduped, order-preserving)."""
+    existing = []
+    for m in _TRELLIS_BLOCK_RE.finditer(content):
+        for raw in _LINK_RE.findall(m.group("links")):
+            tgt = raw.split("|")[0].split("#")[0].strip()
+            if tgt:
+                existing.append(tgt)
+    base = _TRELLIS_BLOCK_RE.sub("", content).rstrip()
+    seen, ordered = set(), []
+    for tgt in [*existing, *new_targets]:
+        k = tgt.lower()
+        if k and k not in seen:
+            seen.add(k)
+            ordered.append(tgt)
+    if not ordered:
+        return (base + "\n") if base else ""
+    block = "\n".join(f"- [[{x}]]" for x in ordered)
+    prefix = (base + "\n\n") if base else ""
+    return f"{prefix}{CONNECTED_HEADER}\n{block}\n"
+
+
 def cmd_apply(cfg, args):
     if not _require_vault(cfg):
         return 1
@@ -1253,7 +1297,6 @@ def cmd_apply(cfg, args):
         print("warning: migrate_tags.py not loadable — tags will be SKIPPED "
               "(links still applied)", file=sys.stderr)
 
-    date_str = datetime.date.today().isoformat()
     conn = connect(cfg["db_path"])
     _ensure_garden_tables(conn)
     applied_links = applied_tags = 0
@@ -1290,11 +1333,8 @@ def cmd_apply(cfg, args):
                 else:
                     print(f"  ! tag merge no-op for {s}; leaving tags", file=sys.stderr)
                     new_tags = []
-            if new_links:  # append to body per vault append-only rule
-                if not content.endswith("\n"):
-                    content += "\n"
-                block = "\n".join(f"- [[{t}]]" for t in new_links)
-                content += f"\nAdded by Claude on {date_str}:\n{block}\n"
+            if new_links:  # fold into the single Connected-notes section
+                content = consolidate_connected(content, new_links)
             with open(full, "w", encoding="utf-8") as fh:
                 fh.write(content)
             for t in new_links:

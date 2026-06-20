@@ -446,5 +446,60 @@ class TestClusterTables(unittest.TestCase):
              "nearest_moc", "score", "first_seen", "status"})
 
 
+class TestTrellisBlocks(unittest.TestCase):
+    NEW = ("Real note content.\n\n### Connected notes added by Trellis\n"
+           "- [[Alpha]]\n- [[Beta]]\n")
+    LEGACY = "Real note content.\n\nAdded by Claude on 2026-06-17:\n- [[Alpha]]\n"
+    TWO_LEGACY = ("Real note content.\n\nAdded by Claude on 2026-06-17:\n- [[Alpha]]\n"
+                  "\nAdded by Claude on 2026-06-20:\n- [[Beta]]\n")
+
+    def test_strip_removes_new_section(self):
+        self.assertEqual(t.strip_trellis_blocks(self.NEW), "Real note content.")
+
+    def test_strip_removes_legacy_block(self):
+        self.assertEqual(t.strip_trellis_blocks(self.LEGACY), "Real note content.")
+
+    def test_strip_removes_multiple_legacy_blocks(self):
+        self.assertEqual(t.strip_trellis_blocks(self.TWO_LEGACY), "Real note content.")
+
+    def test_strip_preserves_authored_links(self):
+        body = "See [[Inline Link]] in the prose."
+        self.assertEqual(t.strip_trellis_blocks(body), body)
+
+    def test_strip_is_idempotent(self):
+        once = t.strip_trellis_blocks(self.NEW)
+        self.assertEqual(t.strip_trellis_blocks(once), once)
+
+    def test_strip_equivalence_with_and_without_block(self):
+        # the whole point: an appended block must not change the embedded/hashed text
+        base = "Real note content."
+        self.assertEqual(
+            t.strip_trellis_blocks(base + "\n\n### Connected notes added by Trellis\n- [[A]]\n"),
+            t.strip_trellis_blocks(base))
+
+    def test_consolidate_creates_section(self):
+        out = t.consolidate_connected("Body.", ["Alpha", "Beta"])
+        self.assertEqual(out.count("### Connected notes added by Trellis"), 1)
+        self.assertIn("- [[Alpha]]", out)
+        self.assertIn("- [[Beta]]", out)
+
+    def test_consolidate_merges_into_existing_section(self):
+        out = t.consolidate_connected(self.NEW, ["Gamma"])
+        self.assertEqual(out.count("### Connected notes added by Trellis"), 1)
+        for tgt in ("Alpha", "Beta", "Gamma"):
+            self.assertIn(f"- [[{tgt}]]", out)
+
+    def test_consolidate_migrates_legacy_blocks(self):
+        out = t.consolidate_connected(self.TWO_LEGACY, ["Gamma"])
+        self.assertNotIn("Added by Claude on", out)              # legacy collapsed
+        self.assertEqual(out.count("### Connected notes added by Trellis"), 1)
+        for tgt in ("Alpha", "Beta", "Gamma"):
+            self.assertIn(f"- [[{tgt}]]", out)
+
+    def test_consolidate_dedups(self):
+        out = t.consolidate_connected(self.NEW, ["Alpha"])       # already present
+        self.assertEqual(out.count("- [[Alpha]]"), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

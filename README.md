@@ -110,11 +110,18 @@ python3 trellis.py apply 2026-06-15.md            # bare filename resolves in _c
 python3 trellis.py apply 2026-06-15.md --dry-run  # preview; writes nothing
 ```
 
-Links are appended to each source note's body under `Added by Claude on <date>:`;
-tags are folded into YAML frontmatter via the vault's `migrate_tags.migrate_content`.
-Already-present links/tags are skipped (safe to re-run), and applied items are
-marked `status='applied'` in the ledger. Tag application is skipped with a warning
-if `migrate_tags.py` can't be loaded (links still apply).
+Links are folded into a single `### Connected notes added by Trellis` section at
+the end of each source note (one section per note — repeat runs merge into it
+rather than stacking dated blocks, and legacy `Added by Claude on <date>:` blocks
+are absorbed into it). Tags are folded into YAML frontmatter via the vault's
+`migrate_tags.migrate_content`. Already-present links/tags are skipped (safe to
+re-run), and applied items are marked `status='applied'` in the ledger. Tag
+application is skipped with a warning if `migrate_tags.py` can't be loaded (links
+still apply).
+
+These appended sections are stripped before embedding and before the gardener's
+change-detection, so the links trellis adds never drift a note's vector or
+re-trigger gardening on an otherwise-unchanged note.
 
 Any non-dry-run `apply` moves the review file to a sibling `applied/` folder —
 even if nothing was checked — so running `apply` on a file always retires it and
