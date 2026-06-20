@@ -834,7 +834,7 @@ def render_report(date_str: str, summary: dict, link_items: list, tag_items: lis
         f"{summary['new_tags']} tag suggestion(s) · "
         f"{summary['orphans']} orphan(s) in scope._")
     L.append("")
-    L.append("> Check the boxes you want, then run the (future) apply step. "
+    L.append("> Check the boxes you want, then run `trellis apply <this file>`. "
              "Nothing here has been written to your notes.")
     L.append("")
     if link_items:
