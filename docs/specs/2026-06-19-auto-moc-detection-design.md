@@ -75,7 +75,7 @@ candidate still appears.
   is not re-surfaced. Once the user actually builds a MOC for a theme, the semantic
   gate excludes that cluster on the next run automatically — no manual status
   update required. `--force` re-surfaces everything and ignores the ledger.
-- **Report** `_claude-output/clusters/YYYY-MM-DD.md` (same dated path + same-day
+- **Report** `_workspace/clusters/YYYY-MM-DD.md` (same dated path + same-day
   collision guard as the gardener). Header summary: `N clusters found · M new
   candidates · K covered`. Per candidate:
   - theme title and `suggested_tag`

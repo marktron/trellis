@@ -41,7 +41,7 @@ DEFAULTS = {
     "ollama_url": "http://localhost:11434",
     "exclude_dirs": [
         ".obsidian", ".trash", ".git", "node_modules",
-        "_claude-output", "templates", "Templates", ".smart-env",
+        "_workspace", "templates", "Templates", ".smart-env",
     ],
     "batch_size": 16,
     # qwen3-embedding's Ollama runner crashes (EOF) on dense inputs above ~7k
@@ -1031,7 +1031,7 @@ def cmd_garden(cfg, args):
         print("\n--- DRY RUN (report not written) ---\n")
         print(report)
         return 0
-    out_dir = os.path.join(vault, "_claude-output", "gardener")
+    out_dir = os.path.join(vault, "_workspace", "gardener")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{date_str}.md")
     if os.path.exists(out_path):  # don't clobber an earlier run on the same day
@@ -1155,7 +1155,7 @@ def cmd_cluster(cfg, args):
                      (c["anchor"], c["theme"], c["tag"], c["member_count"], nm, sc, now, "new"))
     conn.commit()
 
-    out_dir = os.path.join(vault, "_claude-output", "clusters")
+    out_dir = os.path.join(vault, "_workspace", "clusters")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{date_str}.md")
     if os.path.exists(out_path):
@@ -1212,7 +1212,7 @@ def parse_review(md: str) -> dict:
 def _load_migrate_content(cfg):
     """Dynamically load the vault's idempotent tag-migration helper."""
     import importlib.util
-    p = os.path.join(cfg["vault"], "_claude-output", "scripts", "migrate_tags.py")
+    p = os.path.join(cfg["vault"], "_workspace", "scripts", "migrate_tags.py")
     if not os.path.exists(p):
         return None
     try:
@@ -1269,7 +1269,7 @@ def cmd_apply(cfg, args):
         return 1
     path = args.file
     if not os.path.exists(path):
-        alt = os.path.join(cfg["vault"], "_claude-output", "gardener", path)
+        alt = os.path.join(cfg["vault"], "_workspace", "gardener", path)
         if os.path.exists(alt):
             path = alt
     if not os.path.exists(path):

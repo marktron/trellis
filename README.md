@@ -12,14 +12,14 @@ the machine.
 - **Nightly gardener** — link suggestions (embeddings for recall → small model
   for precision), tag suggestions for thin notes (controlled vocabulary), and
   orphan detection. Emits a dated, checkbox review queue to
-  `_claude-output/gardener/` — never edits notes directly.
+  `_workspace/gardener/` — never edits notes directly.
 - **Apply step** — read back the checked boxes in a review file and apply
   approved tags/links to notes (links append to the body; tags fold into
   frontmatter via the vault's idempotent `migrate_tags`).
 - **Auto-MOC detection** — cluster `z/` (UMAP → HDBSCAN), test each cluster
   against existing MOCs (centroid vs. MOC embeddings, plus how much is already
   MOC-linked), name the uncovered ones with the local gen model, and emit a
-  dated candidate report to `_claude-output/clusters/` with a ready-to-run
+  dated candidate report to `_workspace/clusters/` with a ready-to-run
   `/moc` line each.
 
 ## Requirements
@@ -75,7 +75,7 @@ python3 trellis.py garden --scope z/,MOCs  # restrict to path prefixes
 python3 trellis.py garden --force          # re-garden notes even if unchanged
 ```
 
-Reports land in `<vault>/_claude-output/gardener/YYYY-MM-DD.md` as checkbox lists.
+Reports land in `<vault>/_workspace/gardener/YYYY-MM-DD.md` as checkbox lists.
 Two ledgers in the DB make repeat runs cheap and quiet: `garden_state` skips
 notes unchanged since they were last gardened, and `suggestions` prevents
 re-surfacing an idea you've already seen. Notes are processed
@@ -106,7 +106,7 @@ After checking the boxes you want in a review file (and editing tag lists / link
 freely — the apply step reads the file as edited, not the original suggestions):
 
 ```sh
-python3 trellis.py apply 2026-06-15.md            # bare filename resolves in _claude-output/gardener/
+python3 trellis.py apply 2026-06-15.md            # bare filename resolves in _workspace/gardener/
 python3 trellis.py apply 2026-06-15.md --dry-run  # preview; writes nothing
 ```
 
@@ -161,7 +161,7 @@ Requirements above).
 .venv/bin/python3 trellis.py cluster --force      # ignore the seen-ledger
 ```
 
-Reports land in `<vault>/_claude-output/clusters/YYYY-MM-DD.md`. Each candidate
+Reports land in `<vault>/_workspace/clusters/YYYY-MM-DD.md`. Each candidate
 shows its LLM-named theme, a suggested tag, the nearest existing MOC (with
 similarity) and how much of the cluster is already MOC-linked, representative and
 full member lists, and a ready-to-run `/moc <theme>` line. The `moc_candidates`

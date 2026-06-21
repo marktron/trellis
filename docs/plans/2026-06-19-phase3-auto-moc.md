@@ -846,7 +846,7 @@ def cmd_cluster(cfg, args):
                      (c["anchor"], c["theme"], c["tag"], c["member_count"], nm, sc, now, "new"))
     conn.commit()
 
-    out_dir = os.path.join(vault, "_claude-output", "clusters")
+    out_dir = os.path.join(vault, "_workspace", "clusters")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{date_str}.md")
     if os.path.exists(out_path):
@@ -925,7 +925,7 @@ Document, under a new "### Auto-MOC detection (Phase 3)" heading: the venv setup
 .venv/bin/python3 trellis.py cluster --force         # ignore the seen-ledger
 ```
 
-Note that reports land in `_claude-output/clusters/YYYY-MM-DD.md`, that the `moc_candidates` ledger keeps repeat runs quiet, that building a MOC for a theme makes the coverage test drop it automatically, and that `cover_sim_threshold` / `hdbscan_min_cluster_size` are the two dials to tune. Also update the Roadmap to mark Phase 3 done and the Requirements section to mention the venv for clustering.
+Note that reports land in `_workspace/clusters/YYYY-MM-DD.md`, that the `moc_candidates` ledger keeps repeat runs quiet, that building a MOC for a theme makes the coverage test drop it automatically, and that `cover_sim_threshold` / `hdbscan_min_cluster_size` are the two dials to tune. Also update the Roadmap to mark Phase 3 done and the Requirements section to mention the venv for clustering.
 
 - [ ] **Step 4: Verify**
 
@@ -948,7 +948,7 @@ git commit -m "docs: Phase 3 usage + point nightly job at venv python"
 - [ ] **Step 1: Full run**
 
 Run: `~/Developer/trellis/.venv/bin/python3 trellis.py cluster`
-Inspect `_claude-output/clusters/<date>.md`.
+Inspect `_workspace/clusters/<date>.md`.
 
 - [ ] **Step 2: Judge and adjust**
 

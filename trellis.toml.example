@@ -17,7 +17,7 @@ ollama_url = "http://localhost:11434"
 # non-knowledge folders (daily notes, attachments, project dumps, etc.).
 exclude_dirs = [
     ".obsidian", ".trash", ".git", "node_modules",
-    "_claude-output", "templates", "Templates", ".smart-env",
+    "_workspace", "templates", "Templates", ".smart-env",
 ]
 
 batch_size = 16    # notes per embedding request
