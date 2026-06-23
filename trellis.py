@@ -55,6 +55,11 @@ DEFAULTS = {
     "garden_limit": 30,                # max notes per run (review burden, not speed)
     "link_candidates": 8,              # semantic neighbors considered per note
     "max_link_suggestions": 5,         # cap accepted links per note
+    # cold-start: first-pass or sparsely-linked notes get a wider net (see
+    # wants_broad_links). Set broad values equal to the normal ones to disable.
+    "link_thin_threshold": 3,          # <= this many existing links ⇒ broad treatment
+    "link_candidates_broad": 15,       # neighbors considered for a cold-start note
+    "max_link_suggestions_broad": 10,  # cap accepted links for a cold-start note
     "tag_thin_threshold": 1,           # suggest tags only when a note has <= this many
     "tag_candidate_neighbors": 15,     # neighbors whose tags form the candidate vocab
     # --- auto-MOC clustering (phase 3) ---
@@ -576,6 +581,28 @@ CANDIDATES:
 Return JSON only:
 {{"links": [{{"title": "<exact candidate title>", "reason": "<8 words max>"}}]}}"""
 
+LINK_PROMPT_BROAD = """You maintain a Zettelkasten. The SOURCE note below is new or \
+barely linked, so it's starting from a blank slate — favor recall over precision. \
+Given the CANDIDATE notes (found by semantic similarity), suggest every candidate \
+with a genuine conceptual connection a reader of the source would benefit from \
+following. Cast a wide net; only drop candidates that are clearly off-topic.
+
+SOURCE: "{title}"
+{excerpt}
+
+CANDIDATES:
+{candidates}
+
+Return JSON only:
+{{"links": [{{"title": "<exact candidate title>", "reason": "<8 words max>"}}]}}"""
+
+
+def wants_broad_links(rel: str, gardened: dict, link_count: int, threshold: int) -> bool:
+    """Whether a note should get the broader (cold-start) link treatment: true on
+    its first pass (no garden_state entry) or while it stays sparsely linked
+    (<= threshold resolved outlinks)."""
+    return rel not in gardened or link_count <= threshold
+
 TAG_PROMPT = """You maintain a tag vocabulary for a Zettelkasten. Suggest tags for \
 the NOTE below, choosing ONLY from the EXISTING TAGS list so the vocabulary stays \
 consistent. You may propose at most one genuinely new tag if nothing fits.
@@ -932,6 +959,9 @@ def cmd_garden(cfg, args):
     # that already exist outside this note's local neighbor candidate set.
     vault_tags = {tag.lower() for n in notes.values() for tag in n["tags"]}
 
+    gardened = {row[0]: row[1] for row in
+                conn.execute("SELECT path, hash FROM garden_state").fetchall()}
+
     if getattr(args, "note", None):
         # Single-note mode: garden exactly one note, ignoring scope/limit and
         # the unchanged-since-last-run ledger (targeting it implies --force).
@@ -948,8 +978,6 @@ def cmd_garden(cfg, args):
         orphans = [r for r in in_scope
                    if not resolved_outlinks(notes[r], r, title_to_rel) and inbound[r] == 0]
 
-        gardened = {row[0]: row[1] for row in
-                    conn.execute("SELECT path, hash FROM garden_state").fetchall()}
         eligible = [r for r in in_scope
                     if args.force or gardened.get(r) != notes[r]["hash"]]
         # Most-disconnected first: orphans, then by (inbound+outbound) ascending.
@@ -972,16 +1000,23 @@ def cmd_garden(cfg, args):
         already_linked = note["out"]
 
         # ---- link suggestions ----
+        # Cold-start notes (first pass or sparsely linked) cast a wider net.
+        broad = wants_broad_links(rel, gardened,
+                                  len(resolved_outlinks(note, rel, title_to_rel)),
+                                  cfg["link_thin_threshold"])
+        n_cand = cfg["link_candidates_broad"] if broad else cfg["link_candidates"]
+        max_sug = cfg["max_link_suggestions_broad"] if broad else cfg["max_link_suggestions"]
+        link_prompt = LINK_PROMPT_BROAD if broad else LINK_PROMPT
         neigh = [(titles[i], paths[i]) for i, _ in
-                 top_k(mat[idx], mat, cfg["link_candidates"] + 1) if i != idx]
-        cand = [(tt, pp) for tt, pp in neigh[:cfg["link_candidates"]]
+                 top_k(mat[idx], mat, n_cand + 1) if i != idx]
+        cand = [(tt, pp) for tt, pp in neigh[:n_cand]
                 if tt.lower() not in already_linked]
         suggestions = []
         if cand:
             block = "\n".join(
                 f'{i+1}. "{tt}" — {notes.get(pp, {}).get("excerpt", "")[:300]}'
                 for i, (tt, pp) in enumerate(cand))
-            prompt = LINK_PROMPT.format(
+            prompt = link_prompt.format(
                 title=note["title"], excerpt=note["excerpt"][:1200], candidates=block)
             try:
                 out = generate_json(prompt, gen_model, cfg["ollama_url"],
@@ -991,7 +1026,7 @@ def cmd_garden(cfg, args):
                 print(f"  link gen failed for {rel}: {str(e)[:120]}", file=sys.stderr)
                 out = {}
             valid_titles = {tt.lower() for tt, _ in cand}
-            for s in (out.get("links") or [])[:cfg["max_link_suggestions"]]:
+            for s in (out.get("links") or [])[:max_sug]:
                 title = str(s.get("title", "")).strip()
                 if title.lower() not in valid_titles:
                     continue  # model hallucinated a title not in candidates
@@ -1044,7 +1079,7 @@ def cmd_garden(cfg, args):
                 (rel, note["hash"], now))
         conn.commit()
         print(f"  [{n}/{len(eligible)}] {note['title'][:50]}"
-              f"  (+{len(suggestions)} links)", flush=True)
+              f"  (+{len(suggestions)} links){'  (broad)' if broad else ''}", flush=True)
 
     date_str = datetime.date.today().isoformat()
     summary = {"processed": len(eligible), "new_links": new_links,

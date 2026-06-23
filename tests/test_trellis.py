@@ -202,6 +202,26 @@ class TestResolveNote(unittest.TestCase):
         self.assertEqual(t.resolve_note("aging", paths, titles), "z/aging.md")
 
 
+class TestWantsBroadLinks(unittest.TestCase):
+    GARDENED = {"z/well-linked.md": "hash1"}
+
+    def test_never_gardened_is_broad_even_if_well_linked(self):
+        self.assertTrue(t.wants_broad_links("z/new.md", self.GARDENED, 9, 3))
+
+    def test_thin_is_broad_even_if_gardened(self):
+        self.assertTrue(t.wants_broad_links("z/well-linked.md", self.GARDENED, 1, 3))
+
+    def test_gardened_and_well_linked_is_selective(self):
+        self.assertFalse(t.wants_broad_links("z/well-linked.md", self.GARDENED, 9, 3))
+
+    def test_threshold_boundary_inclusive(self):
+        # link_count == threshold counts as thin (broad)
+        self.assertTrue(t.wants_broad_links("z/well-linked.md", self.GARDENED, 3, 3))
+
+    def test_just_over_threshold_is_selective(self):
+        self.assertFalse(t.wants_broad_links("z/well-linked.md", self.GARDENED, 4, 3))
+
+
 class TestRenderReport(unittest.TestCase):
     def test_render_includes_sections_and_checkboxes(self):
         md = t.render_report(

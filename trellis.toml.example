@@ -31,6 +31,12 @@ garden_scope    = ["z/"]             # path prefixes the gardener processes (adj
 garden_limit    = 30                 # max notes per run (0 = no cap)
 link_candidates      = 8             # semantic neighbors considered per note
 max_link_suggestions = 5             # cap accepted links per note
+# Cold-start: a note's first gardening pass (or any note with <= link_thin_threshold
+# existing links) casts a wider net — more candidates, a higher cap, and a
+# recall-favoring prompt. Set the _broad values equal to the normal ones to disable.
+link_thin_threshold        = 3       # <= this many existing links => broad treatment
+link_candidates_broad      = 15      # neighbors considered for a cold-start note
+max_link_suggestions_broad = 10      # cap accepted links for a cold-start note
 tag_thin_threshold   = 1             # suggest tags only when a note has <= this many
 tag_candidate_neighbors = 15         # neighbors whose tags form the candidate vocabulary
 
