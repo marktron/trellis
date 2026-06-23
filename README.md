@@ -49,11 +49,48 @@ Copy the example config and point it at your vault:
 
 ```sh
 cp trellis.toml.example trellis.toml
-# then edit `vault` (and `exclude_dirs` / `*_scope` for your folder layout)
 ```
 
-`trellis.toml` is gitignored — your paths stay local. CLI flags override the
+`trellis.toml` is gitignored, so your paths stay local. CLI flags override the
 file, and you can set the vault out-of-band with `TRELLIS_VAULT=/path/to/vault`.
+
+### How my vault is laid out
+
+I built trellis against my own vault, and a few of the defaults assume its
+shape. The only parts that matter to trellis are two folders:
+
+- `z/` — the Zettelkasten: ~1,100 atomic knowledge notes, each tagged in YAML
+  frontmatter. This is the evergreen stuff worth linking and tagging, so it's
+  what the gardener and the clusterer point at by default.
+- `MOCs/` — Maps of Content: curated landing pages, one per topic cluster.
+  Auto-MOC detection checks new clusters against these so it won't suggest a map
+  I've already drawn.
+
+Everything else — daily notes, people, project areas, admin files, the
+`_workspace` scratch folder — trellis ignores. Not because it's unimportant, but
+because a daily note doesn't need to be woven into the graph the way a permanent
+note does.
+
+The `z/` folder is my personal preference for storing Zettelkasten-style notes; most vaults don't have one. If yours is
+laid out differently, you adapt trellis by changing a handful of variables, and you might be well-served by pointing your LLM agent of choice to this repo, and asking it to customize the code for you based on your setup and personal preferences.
+
+### What to change for your setup
+
+| Variable | What it does | Change it if… |
+|---|---|---|
+| `vault` | absolute path to your vault | always (or set `TRELLIS_VAULT`) |
+| `garden_scope` | folder prefixes the gardener tends | your knowledge notes live somewhere other than `z/` |
+| `cluster_scope` | folders auto-MOC detection clusters | same — point it at your evergreen notes |
+| `exclude_dirs` | folders never indexed, matched by name at any depth | you keep other non-knowledge folders (attachments, archives, journals) |
+| `embed_model` | the Ollama embedding model | you want more recall (`:4b`) or a smaller footprint (`embeddinggemma`) |
+| `gen_model` | the model that judges link/tag suggestions | you prefer a different local model |
+| `tag_thin_threshold` | only suggest tags for notes with ≤ this many | you tag more (or less) aggressively than I do |
+
+The two scope variables are what actually adapt trellis to a different vault.
+Both take a list of path prefixes, so you can aim them at several folders at once
+(`garden_scope = ["notes/", "permanent/"]`) if your knowledge notes aren't in
+one place. `exclude_dirs` matches on folder name anywhere in the tree, so adding
+`"Journal"` skips every `Journal/` folder no matter how deep it sits.
 
 ## Usage
 
@@ -198,7 +235,7 @@ Configuration lives in `trellis.toml`; CLI flags override it.
   you have the memory headroom. `embeddinggemma` is the smaller-footprint
   alternative (2K context).
 - **Generation/judgment:** `qwen3.6:35b-a3b` (fast MoE) or `gemma4` — pull
-  whichever you prefer with `ollama pull`.
+  whichever you prefer with `ollama pull`. You should have good results with lower-parameter qwen3.6 models if the 35b version is too beefy for your machine (It runs fine on my M5 Pro Macbook Pro w/ 48 GB memory).
 
 ## Tests
 
