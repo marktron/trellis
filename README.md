@@ -168,23 +168,6 @@ deleted), and the archived file is the only human-readable record of suggestions
 you *declined* (the seen-ledger keeps those from re-appearing). Use `--dry-run`
 to apply nothing and leave the file in place.
 
-### Migrating legacy link blocks
-
-Older versions appended links under dated `Added by Claude on <date>:` headers.
-`migrate` converts those into the single Connected-notes section:
-
-```sh
-python3 trellis.py migrate            # dry run — lists what would change, writes nothing
-python3 trellis.py migrate --apply    # write the changes
-python3 trellis.py migrate --scope z/ # limit to path prefixes
-```
-
-It's block-precise: it converts only `Added by Claude` blocks that are a
-`[[wikilink]]` list. Prose blocks under that marker are left exactly as-is — even
-when a note has both a prose block and a link block. Notes that still carry a
-manual prose block are reported so you can eyeball them. Run `index --rebuild`
-afterward.
-
 ### Auto-MOC detection
 
 Finds dense thematic clusters in `z/` that no MOC covers yet, and writes them as

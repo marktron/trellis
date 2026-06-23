@@ -170,12 +170,6 @@ def strip_trellis_blocks(text: str) -> str:
     return _TRELLIS_BLOCK_RE.sub("", text)
 
 
-# Detects a legacy "Added by Claude on <date>:" marker line. Used only to REPORT
-# prose blocks left untouched by migration — migration itself keys on
-# _TRELLIS_BLOCK_RE, which matches only marker + [[wikilink]]-list blocks.
-_LEGACY_MARKER_RE = re.compile(r"^Added by Claude on [^\n]*:[ \t]*$", re.MULTILINE)
-
-
 def l2_normalize(mat: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
@@ -1427,47 +1421,6 @@ def cmd_apply(cfg, args):
 # --------------------------------------------------------------------------- #
 # Migrate: legacy "Added by Claude on <date>:" link blocks -> one section
 # --------------------------------------------------------------------------- #
-def cmd_migrate(cfg, args):
-    if not _require_vault(cfg):
-        return 1
-    vault = cfg["vault"]
-    scope = tuple(args.scope.split(",")) if args.scope else None
-    exclude = set(cfg["exclude_dirs"])
-    converted, prose_left = [], []
-    for full, rel in iter_markdown(vault, exclude):
-        if scope and not rel.startswith(scope):
-            continue
-        raw = read_note(full)
-        if raw is None:
-            continue
-        text = raw.decode("utf-8", "replace")
-        # Block-precise: convert only marker + [[link]]-list blocks. Prose blocks
-        # under an "Added by Claude" marker don't match _TRELLIS_BLOCK_RE and are
-        # left exactly as-is, even when they sit in the same note as a link block.
-        after = consolidate_connected(text, []) if _TRELLIS_BLOCK_RE.search(text) else text
-        if after != text:
-            if args.apply:
-                with open(full, "w", encoding="utf-8") as fh:
-                    fh.write(after)
-            converted.append(rel)
-        if _LEGACY_MARKER_RE.search(after):
-            prose_left.append(rel)                    # a manual prose marker remains
-
-    head = "migrated" if args.apply else "DRY RUN — would migrate"
-    print(f"{head}: {len(converted)} note(s) -> single '{CONNECTED_HEADER}' section")
-    for rel in converted:
-        print(f"  ✓ {rel}")
-    if prose_left:
-        print(f"\nleft {len(prose_left)} note(s) with a manual 'Added by Claude' prose "
-              f"block untouched (some may also appear above — their link block "
-              f"was still converted):")
-        for rel in prose_left:
-            print(f"  · {rel}")
-    if not args.apply:
-        print("\nnothing written. Re-run with --apply to write these changes.")
-    return 0
-
-
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
@@ -1518,12 +1471,6 @@ def main(argv=None):
     pcl.add_argument("--dry-run", action="store_true",
                      help="print report; write nothing (no ledger, no file)")
 
-    pm = sub.add_parser(
-        "migrate",
-        help="convert legacy 'Added by Claude on <date>:' link blocks to one Connected-notes section")
-    pm.add_argument("--scope", help="comma-separated path prefixes (default: whole vault)")
-    pm.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
-
     args = p.parse_args(argv)
     cfg = load_config({"vault": args.vault, "embed_model": args.embed_model,
                        "db_path": args.db_path,
@@ -1531,7 +1478,7 @@ def main(argv=None):
     return {
         "index": cmd_index, "search": cmd_search,
         "neighbors": cmd_neighbors, "status": cmd_status, "garden": cmd_garden,
-        "apply": cmd_apply, "cluster": cmd_cluster, "migrate": cmd_migrate,
+        "apply": cmd_apply, "cluster": cmd_cluster,
     }[args.cmd](cfg, args)
 
 
