@@ -73,6 +73,7 @@ python3 trellis.py garden --dry-run        # print the report, write nothing
 python3 trellis.py garden --limit 0        # no cap — drains the whole backlog (~3h for 877 notes)
 python3 trellis.py garden --scope z/,MOCs  # restrict to path prefixes
 python3 trellis.py garden --force          # re-garden notes even if unchanged
+python3 trellis.py garden --note "VO2max"  # garden one note (title or path); implies --force
 ```
 
 Reports land in `<vault>/_workspace/gardener/YYYY-MM-DD.md` as checkbox lists.

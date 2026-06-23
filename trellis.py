@@ -502,22 +502,34 @@ def cmd_search(cfg, args):
     return 0
 
 
+def resolve_note(query: str, paths: list[str], titles: list[str]) -> str | None:
+    """Resolve a user-supplied note reference to a single indexed path.
+
+    Matches on exact title (case-insensitive, trailing `.md` stripped) or path
+    substring. On multiple hits an exact title match wins, else the first match.
+    Returns the path, or None if nothing matches."""
+    q = query.lower().removesuffix(".md")
+    matches = [p for p, tt in zip(paths, titles)
+               if q == tt.lower() or q in p.lower()]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        exact = [p for p, tt in zip(paths, titles) if tt.lower() == q]
+        matches = exact or matches
+    return matches[0]
+
+
 def cmd_neighbors(cfg, args):
     conn = connect(cfg["db_path"])
     paths, titles, mat = _load_matrix(conn)
     if not paths:
         print("index is empty — run:  python3 trellis.py index", file=sys.stderr)
         return 1
-    q = args.note.lower().removesuffix(".md")
-    matches = [i for i, p in enumerate(paths)
-               if q == titles[i].lower() or q in p.lower()]
-    if not matches:
+    target = resolve_note(args.note, paths, titles)
+    if target is None:
         print(f"no indexed note matches '{args.note}'", file=sys.stderr)
         return 1
-    if len(matches) > 1:
-        exact = [i for i in matches if titles[i].lower() == q]
-        matches = exact or matches
-    src = matches[0]
+    src = paths.index(target)
     print(f"neighbors of: {titles[src]}  ({paths[src]})\n")
     for idx, score in top_k(mat[src], mat, args.k + 1):
         if idx == src:
@@ -920,21 +932,33 @@ def cmd_garden(cfg, args):
     # that already exist outside this note's local neighbor candidate set.
     vault_tags = {tag.lower() for n in notes.values() for tag in n["tags"]}
 
-    in_scope = [r for r in notes if r.startswith(scope) and r in rel_to_idx]
-    orphans = [r for r in in_scope
-               if not resolved_outlinks(notes[r], r, title_to_rel) and inbound[r] == 0]
+    if getattr(args, "note", None):
+        # Single-note mode: garden exactly one note, ignoring scope/limit and
+        # the unchanged-since-last-run ledger (targeting it implies --force).
+        target = resolve_note(args.note, paths, titles)
+        if target is None or target not in notes:
+            print(f"no indexed note matches '{args.note}'", file=sys.stderr)
+            return 1
+        in_scope = eligible = [target]
+        orphans = [target] if (not resolved_outlinks(notes[target], target, title_to_rel)
+                               and inbound[target] == 0) else []
+        print(f"single note · {notes[target]['title']}  ({target})\n", flush=True)
+    else:
+        in_scope = [r for r in notes if r.startswith(scope) and r in rel_to_idx]
+        orphans = [r for r in in_scope
+                   if not resolved_outlinks(notes[r], r, title_to_rel) and inbound[r] == 0]
 
-    gardened = {row[0]: row[1] for row in
-                conn.execute("SELECT path, hash FROM garden_state").fetchall()}
-    eligible = [r for r in in_scope
-                if args.force or gardened.get(r) != notes[r]["hash"]]
-    # Most-disconnected first: orphans, then by (inbound+outbound) ascending.
-    eligible.sort(key=lambda r: (inbound[r] + len(resolved_outlinks(notes[r], r, title_to_rel))))
-    if limit:
-        eligible = eligible[:limit]
+        gardened = {row[0]: row[1] for row in
+                    conn.execute("SELECT path, hash FROM garden_state").fetchall()}
+        eligible = [r for r in in_scope
+                    if args.force or gardened.get(r) != notes[r]["hash"]]
+        # Most-disconnected first: orphans, then by (inbound+outbound) ascending.
+        eligible.sort(key=lambda r: (inbound[r] + len(resolved_outlinks(notes[r], r, title_to_rel))))
+        if limit:
+            eligible = eligible[:limit]
 
-    print(f"scope {scope} · {len(in_scope)} notes · {len(orphans)} orphans · "
-          f"{len(eligible)} to process this run\n", flush=True)
+        print(f"scope {scope} · {len(in_scope)} notes · {len(orphans)} orphans · "
+              f"{len(eligible)} to process this run\n", flush=True)
 
     seen = {(row[0], row[1], row[2]) for row in
             conn.execute("SELECT path, kind, value FROM suggestions").fetchall()}
@@ -1436,6 +1460,8 @@ def main(argv=None):
     sub.add_parser("status", help="show index stats")
 
     pg = sub.add_parser("garden", help="suggest links/tags -> dated review queue")
+    pg.add_argument("--note", help="garden a single note (title or path substring); "
+                                   "ignores --scope/--limit and implies --force")
     pg.add_argument("--limit", type=int, help="max notes this run (0 = no cap)")
     pg.add_argument("--scope", help="comma-separated path prefixes (default: z/)")
     pg.add_argument("--gen-model", dest="gen_model", help="judgment model")

@@ -176,6 +176,32 @@ class TestClassifyTagSuggestions(unittest.TestCase):
         self.assertEqual(len(new_tag), 1)
 
 
+class TestResolveNote(unittest.TestCase):
+    PATHS = ["z/sleep-and-aging.md", "z/vo2max.md", "MOCs/Active Aging MOC.md"]
+    TITLES = ["Sleep and aging", "VO2max", "Active Aging MOC"]
+
+    def test_exact_title_case_insensitive(self):
+        self.assertEqual(t.resolve_note("vo2max", self.PATHS, self.TITLES),
+                         "z/vo2max.md")
+
+    def test_path_substring(self):
+        self.assertEqual(t.resolve_note("sleep-and-aging", self.PATHS, self.TITLES),
+                         "z/sleep-and-aging.md")
+
+    def test_md_suffix_stripped(self):
+        self.assertEqual(t.resolve_note("vo2max.md", self.PATHS, self.TITLES),
+                         "z/vo2max.md")
+
+    def test_no_match_returns_none(self):
+        self.assertIsNone(t.resolve_note("nonexistent", self.PATHS, self.TITLES))
+
+    def test_ambiguous_prefers_exact_title(self):
+        # "aging" is a substring of two paths; an exact title wins.
+        paths = ["z/aging.md", "z/sleep-and-aging.md"]
+        titles = ["aging", "Sleep and aging"]
+        self.assertEqual(t.resolve_note("aging", paths, titles), "z/aging.md")
+
+
 class TestRenderReport(unittest.TestCase):
     def test_render_includes_sections_and_checkboxes(self):
         md = t.render_report(
