@@ -15,6 +15,7 @@ Config precedence: CLI flags > trellis.toml > built-in defaults.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -60,6 +61,17 @@ DEFAULTS = {
     "link_thin_threshold": 3,          # <= this many existing links ⇒ broad treatment
     "link_candidates_broad": 15,       # neighbors considered for a cold-start note
     "max_link_suggestions_broad": 10,  # cap accepted links for a cold-start note
+    # Link-target hygiene: candidates are drawn from the whole index, so
+    # operational/scaffold notes leak in and get rejected. link_target_scope (if
+    # set) restricts targets to these path prefixes; link_target_exclude drops
+    # candidates whose basename matches any glob (case-insensitive).
+    "link_target_scope": [],           # [] = any prefix; e.g. ["z/", "MOCs"]
+    "link_target_exclude": [
+        "_*",                          # scaffold: _decisions, _snapshot, _parked, …
+        "readme", "capture", "untitled*",
+        "timeline", "design notes", "dev notes", "idea triage", "feature ideas",
+        "[12][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]*",  # dated daily/review notes
+    ],
     "tag_thin_threshold": 1,           # suggest tags only when a note has <= this many
     "tag_candidate_neighbors": 15,     # neighbors whose tags form the candidate vocab
     # --- auto-MOC clustering (phase 3) ---
@@ -572,7 +584,8 @@ SOURCE: "{title}"
 CANDIDATES:
 {candidates}
 
-Return JSON only:
+Return JSON only. The reason must be 8 words max and name the specific shared idea \
+— avoid vague fillers like "related", "similar", or "provides context":
 {{"links": [{{"title": "<exact candidate title>", "reason": "<8 words max>"}}]}}"""
 
 LINK_PROMPT_BROAD = """You maintain a Zettelkasten. The SOURCE note below is new or \
@@ -587,7 +600,8 @@ SOURCE: "{title}"
 CANDIDATES:
 {candidates}
 
-Return JSON only:
+Return JSON only. The reason must be 8 words max and name the specific shared idea \
+— avoid vague fillers like "related", "similar", or "provides context":
 {{"links": [{{"title": "<exact candidate title>", "reason": "<8 words max>"}}]}}"""
 
 
@@ -597,9 +611,24 @@ def wants_broad_links(rel: str, gardened: dict, link_count: int, threshold: int)
     (<= threshold resolved outlinks)."""
     return rel not in gardened or link_count <= threshold
 
+
+def eligible_link_target(path: str, scope, exclude_globs) -> bool:
+    """Whether a candidate note may be SUGGESTED as a link target. Filters out
+    operational/scaffold notes (underscore files, READMEs, dated notes, etc.)
+    that reviewers consistently reject, and — when scope is non-empty — anything
+    outside it. Globs match the basename (sans .md), case-insensitively."""
+    if scope and not path.startswith(tuple(scope)):
+        return False
+    stem = os.path.basename(path)
+    if stem.lower().endswith(".md"):
+        stem = stem[:-3]
+    s = stem.lower()
+    return not any(fnmatch.fnmatchcase(s, g.lower()) for g in exclude_globs)
+
+
 TAG_PROMPT = """You maintain a tag vocabulary for a Zettelkasten. Suggest tags for \
 the NOTE below, choosing ONLY from the EXISTING TAGS list so the vocabulary stays \
-consistent. You may propose at most one genuinely new tag if nothing fits.
+consistent. Do not invent new tags; if nothing fits, return an empty list.
 
 NOTE: "{title}"
 {excerpt}
@@ -607,7 +636,7 @@ NOTE: "{title}"
 EXISTING TAGS (choose from these): {tags}
 
 Return JSON only:
-{{"tags": ["<existing tag>", ...], "proposed_new": ["<new tag or omit>"]}}"""
+{{"tags": ["<existing tag>", ...]}}"""
 
 
 def parse_outlinks(body: str) -> set[str]:
@@ -882,9 +911,6 @@ def render_report(date_str: str, summary: dict, link_items: list, tag_items: lis
         for it in tag_items:
             tags = " ".join(f"`{x}`" for x in it["tags"])
             L.append(f"- [ ] [[{it['source']}]] → {tags}")
-            if it.get("proposed_new"):
-                pn = " ".join(f"`{x}`" for x in it["proposed_new"])
-                L.append(f"  - [ ] (new tag, use sparingly) {pn}")
         L.append("")
     if orphans:
         L.append(f"## Orphans in scope ({len(orphans)} total — "
@@ -987,6 +1013,8 @@ def cmd_garden(cfg, args):
     now = time.time()
     link_items, tag_items = [], []
     new_links = new_tags = 0
+    target_scope = tuple(cfg["link_target_scope"])
+    target_exclude = cfg["link_target_exclude"]
 
     for n, rel in enumerate(eligible, 1):
         note = notes[rel]
@@ -1001,10 +1029,13 @@ def cmd_garden(cfg, args):
         n_cand = cfg["link_candidates_broad"] if broad else cfg["link_candidates"]
         max_sug = cfg["max_link_suggestions_broad"] if broad else cfg["max_link_suggestions"]
         link_prompt = LINK_PROMPT_BROAD if broad else LINK_PROMPT
+        # Over-fetch neighbors so target-hygiene filtering still yields n_cand.
+        pool = min(len(paths), n_cand * 4 + 1)
         neigh = [(titles[i], paths[i]) for i, _ in
-                 top_k(mat[idx], mat, n_cand + 1) if i != idx]
-        cand = [(tt, pp) for tt, pp in neigh[:n_cand]
-                if tt.lower() not in already_linked]
+                 top_k(mat[idx], mat, pool) if i != idx]
+        cand = [(tt, pp) for tt, pp in neigh
+                if tt.lower() not in already_linked
+                and eligible_link_target(pp, target_scope, target_exclude)][:n_cand]
         suggestions = []
         if cand:
             block = "\n".join(
@@ -1028,7 +1059,7 @@ def cmd_garden(cfg, args):
                 if key in seen:
                     continue
                 seen.add(key)
-                reason = str(s.get("reason", "")).strip()[:120]
+                reason = " ".join(str(s.get("reason", "")).split()[:8])[:120]
                 suggestions.append({"title": title, "reason": reason})
                 if not args.dry_run:
                     conn.execute("INSERT OR IGNORE INTO suggestions VALUES(?,?,?,?,?,?)",
@@ -1052,19 +1083,20 @@ def cmd_garden(cfg, args):
                                     num_predict=cfg["gen_num_predict"])
                 except OllamaError:
                     out = {}
-                picked, new_tag = classify_tag_suggestions(
-                    out.get("tags", []), out.get("proposed_new", []),
+                # New-tag proposals were almost never accepted in review, so we no
+                # longer ask for them — restrict to the existing vocabulary.
+                picked, _ = classify_tag_suggestions(
+                    out.get("tags", []), [],
                     cand_tags, vault_tags, note["tags"])
                 fresh = [t for t in picked if (rel, "tag", t) not in seen]
-                if fresh or new_tag:
+                if fresh:
                     for t in fresh:
                         seen.add((rel, "tag", t))
                         if not args.dry_run:
                             conn.execute("INSERT OR IGNORE INTO suggestions VALUES(?,?,?,?,?,?)",
                                          (rel, "tag", t, "", now, "new"))
-                    tag_items.append({"source": note["title"], "tags": fresh,
-                                      "proposed_new": new_tag})
-                    new_tags += len(fresh) + len(new_tag)
+                    tag_items.append({"source": note["title"], "tags": fresh})
+                    new_tags += len(fresh)
 
         if not args.dry_run:
             conn.execute(

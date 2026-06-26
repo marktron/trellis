@@ -202,6 +202,34 @@ class TestResolveNote(unittest.TestCase):
         self.assertEqual(t.resolve_note("aging", paths, titles), "z/aging.md")
 
 
+class TestEligibleLinkTarget(unittest.TestCase):
+    EXCLUDE = ["_*", "readme", "capture", "untitled*",
+               "timeline", "design notes", "dev notes",
+               "[12][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]*"]
+
+    def test_normal_note_allowed_no_scope(self):
+        self.assertTrue(t.eligible_link_target("z/Moats.md", (), self.EXCLUDE))
+
+    def test_underscore_scaffold_excluded(self):
+        self.assertFalse(t.eligible_link_target("Areas/Resper/_decisions.md", (), self.EXCLUDE))
+
+    def test_dated_note_excluded(self):
+        self.assertFalse(t.eligible_link_target(
+            "z/2026-06-08-health-evidence-review.md", (), self.EXCLUDE))
+
+    def test_named_scaffold_case_insensitive(self):
+        self.assertFalse(t.eligible_link_target("Areas/x/README.md", (), self.EXCLUDE))
+        self.assertFalse(t.eligible_link_target("Areas/x/Design Notes.md", (), self.EXCLUDE))
+
+    def test_scope_excludes_out_of_scope(self):
+        scope = ("z/", "MOCs")
+        self.assertFalse(t.eligible_link_target("Areas/Spark/Plan.md", scope, self.EXCLUDE))
+        self.assertTrue(t.eligible_link_target("z/Moats.md", scope, self.EXCLUDE))
+
+    def test_empty_exclude_allows_all(self):
+        self.assertTrue(t.eligible_link_target("Areas/Resper/_decisions.md", (), []))
+
+
 class TestWantsBroadLinks(unittest.TestCase):
     GARDENED = {"z/well-linked.md": "hash1"}
 

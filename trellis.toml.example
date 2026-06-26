@@ -37,6 +37,19 @@ max_link_suggestions = 5             # cap accepted links per note
 link_thin_threshold        = 3       # <= this many existing links => broad treatment
 link_candidates_broad      = 15      # neighbors considered for a cold-start note
 max_link_suggestions_broad = 10      # cap accepted links for a cold-start note
+# Link-target hygiene. Candidates come from the whole index, so operational /
+# scaffold notes (project _decisions/_snapshot files, READMEs, dated daily notes,
+# etc.) leak in and get rejected in review. link_target_scope, if non-empty,
+# restricts link TARGETS to these path prefixes; link_target_exclude drops any
+# candidate whose filename matches a glob (case-insensitive, matched on the
+# basename without .md). Tune both to your vault's conventions.
+link_target_scope   = []             # [] = any prefix; e.g. ["z/", "MOCs"]
+link_target_exclude = [
+    "_*",                            # scaffold: _decisions, _snapshot, _parked, …
+    "readme", "capture", "untitled*",
+    "timeline", "design notes", "dev notes", "idea triage", "feature ideas",
+    "[12][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]*",  # dated daily/review notes
+]
 tag_thin_threshold   = 1             # suggest tags only when a note has <= this many
 tag_candidate_neighbors = 15         # neighbors whose tags form the candidate vocabulary
 
