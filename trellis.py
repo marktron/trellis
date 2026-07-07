@@ -1349,26 +1349,68 @@ def consolidate_connected(content: str, new_targets) -> str:
     return f"{prefix}{CONNECTED_HEADER}\n{block}\n"
 
 
+def _pending_reviews(cfg) -> list[str]:
+    """List pending gardener review files: top-level `.md` files in the gardener
+    folder. The `applied/` archive subdir (and anything below it) is ignored."""
+    gdir = os.path.join(cfg["vault"], "_workspace", "gardener")
+    if not os.path.isdir(gdir):
+        return []
+    return sorted(
+        os.path.join(gdir, f)
+        for f in os.listdir(gdir)
+        if f.endswith(".md") and os.path.isfile(os.path.join(gdir, f))
+    )
+
+
 def cmd_apply(cfg, args):
     if not _require_vault(cfg):
         return 1
-    path = args.file
-    if not os.path.exists(path):
-        alt = os.path.join(cfg["vault"], "_workspace", "gardener", path)
-        if os.path.exists(alt):
-            path = alt
-    if not os.path.exists(path):
-        print(f"error: review file not found: {args.file}", file=sys.stderr)
-        return 1
 
+    if args.file:
+        path = args.file
+        if not os.path.exists(path):
+            alt = os.path.join(cfg["vault"], "_workspace", "gardener", path)
+            if os.path.exists(alt):
+                path = alt
+        if not os.path.exists(path):
+            print(f"error: review file not found: {args.file}", file=sys.stderr)
+            return 1
+        paths = [path]
+    else:
+        paths = _pending_reviews(cfg)
+        if not paths:
+            print("no pending reviews in the gardener folder — nothing to apply")
+            return 0
+        print(f"applying {len(paths)} pending review(s) from the gardener folder")
+
+    multi = len(paths) > 1
+    tot_links = tot_tags = tot_sources = 0
+    for path in paths:
+        if multi:
+            print(f"\n── {os.path.basename(path)} ──")
+        l, t, s = _apply_review_file(cfg, path, args.dry_run)
+        tot_links += l
+        tot_tags += t
+        tot_sources += s
+
+    if multi:
+        head = "DRY RUN — would apply" if args.dry_run else "applied"
+        print(f"\nTOTAL {head}: {tot_links} link(s) · {tot_tags} tag(s) "
+              f"across {tot_sources} source note(s) in {len(paths)} review(s)")
+    return 0
+
+
+def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
+    """Apply the checked items from a single review file into the vault's notes.
+    Returns (applied_links, applied_tags, source_note_count)."""
     review = parse_review(open(path, encoding="utf-8").read())
     if not review["links"] and not review["tags"]:
         print(f"no checked items in {path} — nothing to apply")
-        if not args.dry_run:  # explicit apply = retire the review anyway
+        if not dry_run:  # explicit apply = retire the review anyway
             archived = _archive_review(path)
             if archived:
                 print(f"archived review → {archived}")
-        return 0
+        return 0, 0, 0
 
     notes = _scan_vault(cfg["vault"], set(cfg["exclude_dirs"]), cfg["max_chars"])
     title_to_rel: dict[str, str] = {}
@@ -1406,7 +1448,7 @@ def cmd_apply(cfg, args):
             print(f"  = up to date: {s}")
             continue
 
-        if args.dry_run:
+        if dry_run:
             print(f"  {rel}")
             for t in new_tags:
                 print(f"      + tag   {t}")
@@ -1438,16 +1480,16 @@ def cmd_apply(cfg, args):
         applied_links += len(new_links)
         applied_tags += len(new_tags)
 
-    if not args.dry_run:
+    if not dry_run:
         conn.commit()
-    head = "DRY RUN — would apply" if args.dry_run else "applied"
+    head = "DRY RUN — would apply" if dry_run else "applied"
     print(f"\n{head}: {applied_links} link(s) · {applied_tags} tag(s) "
           f"across {len(sources)} source note(s)")
-    if not args.dry_run:
+    if not dry_run:
         archived = _archive_review(path)
         if archived:
             print(f"archived review → {archived}")
-    return 0
+    return applied_links, applied_tags, len(sources)
 
 
 # --------------------------------------------------------------------------- #
@@ -1491,7 +1533,9 @@ def main(argv=None):
                     help="print the report; write nothing (no ledger, no file)")
 
     pa = sub.add_parser("apply", help="write checked items from a review file into notes")
-    pa.add_argument("file", help="path to a gardener review .md (or just its filename)")
+    pa.add_argument("file", nargs="?",
+                    help="path to a gardener review .md (or just its filename); "
+                         "omit to apply all pending reviews in the gardener folder")
     pa.add_argument("--dry-run", action="store_true",
                     help="show what would change; write nothing")
 

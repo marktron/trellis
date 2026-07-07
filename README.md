@@ -146,7 +146,13 @@ freely — the apply step reads the file as edited, not the original suggestions
 ```sh
 python3 trellis.py apply 2026-06-15.md            # bare filename resolves in _workspace/gardener/
 python3 trellis.py apply 2026-06-15.md --dry-run  # preview; writes nothing
+python3 trellis.py apply                          # no file → apply every pending review in _workspace/gardener/
+python3 trellis.py apply --dry-run                # preview all pending reviews
 ```
+
+With no file argument, `apply` processes every top-level `.md` in the gardener
+folder (the `applied/` archive is skipped), applying and retiring each in turn and
+printing a combined total at the end.
 
 Links are folded into a single `### Connected notes added by Trellis` section at
 the end of each source note (one section per note — repeat runs merge into it

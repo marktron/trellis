@@ -337,6 +337,44 @@ class TestArchiveReview(unittest.TestCase):
             self.assertEqual(fh.read(), "old")                # prior archive intact
 
 
+class TestPendingReviews(unittest.TestCase):
+    def _vault_with(self, *review_names, applied=()):
+        import tempfile
+        vault = tempfile.mkdtemp()
+        gdir = os.path.join(vault, "_workspace", "gardener")
+        os.makedirs(gdir)
+        for name in review_names:
+            with open(os.path.join(gdir, name), "w") as fh:
+                fh.write("review")
+        if applied:
+            os.makedirs(os.path.join(gdir, "applied"))
+            for name in applied:
+                with open(os.path.join(gdir, "applied", name), "w") as fh:
+                    fh.write("done")
+        return vault, gdir
+
+    def test_lists_top_level_md_sorted(self):
+        vault, gdir = self._vault_with("2026-06-16.md", "2026-06-15.md")
+        self.assertEqual(
+            t._pending_reviews({"vault": vault}),
+            [os.path.join(gdir, "2026-06-15.md"),
+             os.path.join(gdir, "2026-06-16.md")],
+        )
+
+    def test_ignores_applied_subdir_and_non_md(self):
+        vault, gdir = self._vault_with("live.md", applied=("old.md",))
+        with open(os.path.join(gdir, "notes.txt"), "w") as fh:
+            fh.write("nope")
+        self.assertEqual(
+            t._pending_reviews({"vault": vault}),
+            [os.path.join(gdir, "live.md")],
+        )
+
+    def test_missing_gardener_folder_returns_empty(self):
+        import tempfile
+        self.assertEqual(t._pending_reviews({"vault": tempfile.mkdtemp()}), [])
+
+
 class TestGeneratePayload(unittest.TestCase):
     def test_caps_tokens_disables_thinking_and_passes_timeout(self):
         captured = {}
