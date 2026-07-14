@@ -56,6 +56,9 @@ DEFAULTS = {
     "gen_timeout": 120,                # seconds per generation before skipping a note
     "gen_num_predict": 1024,           # output token cap (prevents greedy runaway)
     "garden_scope": ["z/"],            # path prefixes the gardener tends
+    "gardener_dir": "_workspace/gardener",  # vault-relative review-queue dir; keep it
+                                       # under a folder in exclude_dirs or trellis
+                                       # will index its own review files
     "garden_limit": 30,                # max notes per run (review burden, not speed)
     "link_candidates": 8,              # semantic neighbors considered per note
     "max_link_suggestions": 5,         # cap accepted links per note
@@ -79,6 +82,10 @@ DEFAULTS = {
     "tag_candidate_neighbors": 15,     # neighbors whose tags form the candidate vocab
     # --- auto-MOC clustering (phase 3) ---
     "cluster_scope": ["z/"],          # path prefixes clustered for MOC candidates
+    "moc_scope": ["MOCs/"],           # path prefixes holding your Maps of Content
+                                      # (the coverage reference for candidates)
+    "clusters_dir": "_workspace/clusters",  # vault-relative candidate-report dir;
+                                      # same exclude_dirs caveat as gardener_dir
     "umap_components": 5,             # UMAP target dimensionality
     "umap_neighbors": 15,            # UMAP n_neighbors
     "umap_min_dist": 0.0,            # UMAP min_dist (0 = tightest clusters)
@@ -765,11 +772,12 @@ def coverage_score(centroid_vec, moc_matrix):
     return j, float(sims[j])
 
 
-def moc_linked_targets(notes, title_to_rel):
-    """Set of rel paths that are wikilink targets from any note under MOCs/."""
+def moc_linked_targets(notes, title_to_rel, moc_prefixes):
+    """Set of rel paths that are wikilink targets from any note whose path
+    starts with one of `moc_prefixes` (the configured `moc_scope`)."""
     linked = set()
     for rel, n in notes.items():
-        if not rel.startswith("MOCs"):
+        if not rel.startswith(tuple(moc_prefixes)):
             continue
         for tgt in n["out"]:
             dest = title_to_rel.get(tgt)
@@ -1160,11 +1168,7 @@ def cmd_garden(cfg, args):
         print("\n--- DRY RUN (report not written) ---\n")
         print(report)
         return 0
-    out_dir = os.path.join(vault, "_workspace", "gardener")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{date_str}.md")
-    if os.path.exists(out_path):  # don't clobber an earlier run on the same day
-        out_path = os.path.join(out_dir, f"{date_str}-{time.strftime('%H%M')}.md")
+    out_path = _dated_report_path(os.path.join(vault, cfg["gardener_dir"]), date_str)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(report)
     print(f"\nreview queue → {out_path}")
@@ -1193,7 +1197,8 @@ def cmd_cluster(cfg, args):
 
     # Notes to cluster (scope) and MOC vectors (coverage reference).
     cl_idx = [i for i, p in enumerate(paths) if p.startswith(scope)]
-    moc_idx = [i for i, p in enumerate(paths) if p.startswith("MOCs")]
+    moc_prefixes = tuple(cfg["moc_scope"])
+    moc_idx = [i for i, p in enumerate(paths) if p.startswith(moc_prefixes)]
     if len(cl_idx) < cfg["hdbscan_min_cluster_size"]:
         print(f"too few notes in scope {scope} to cluster", file=sys.stderr)
         return 1
@@ -1214,7 +1219,7 @@ def cmd_cluster(cfg, args):
     print("scanning vault for tags + MOC links…", flush=True)
     notes = _scan_vault(vault, set(cfg["exclude_dirs"]), cfg["max_chars"])
     title_to_rel, _ = build_link_graph(notes)
-    moc_linked = moc_linked_targets(notes, title_to_rel)
+    moc_linked = moc_linked_targets(notes, title_to_rel, moc_prefixes)
 
     seen_anchors = {row[0] for row in
                     conn.execute("SELECT anchor_path FROM moc_candidates").fetchall()}
@@ -1284,11 +1289,7 @@ def cmd_cluster(cfg, args):
                      (c["anchor"], c["theme"], c["tag"], c["member_count"], nm, sc, now, "new"))
     conn.commit()
 
-    out_dir = os.path.join(vault, "_workspace", "clusters")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{date_str}.md")
-    if os.path.exists(out_path):
-        out_path = os.path.join(out_dir, f"{date_str}-{time.strftime('%H%M')}.md")
+    out_path = _dated_report_path(os.path.join(vault, cfg["clusters_dir"]), date_str)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(report)
     print(f"\nMOC candidates → {out_path}")
@@ -1468,10 +1469,20 @@ def merge_frontmatter_tags(content: str, new_tags: list[str]) -> str | None:
     return new_content
 
 
+def _dated_report_path(out_dir: str, date_str: str) -> str:
+    """Path for a dated report in out_dir (created if missing), timestamp-suffixed
+    so an earlier run on the same day is never clobbered."""
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{date_str}.md")
+    if os.path.exists(path):
+        path = os.path.join(out_dir, f"{date_str}-{time.strftime('%H%M')}.md")
+    return path
+
+
 def _pending_reviews(cfg) -> list[str]:
-    """List pending gardener review files: top-level `.md` files in the gardener
-    folder. The `applied/` archive subdir (and anything below it) is ignored."""
-    gdir = os.path.join(cfg["vault"], "_workspace", "gardener")
+    """List pending gardener review files: top-level `.md` files in the configured
+    gardener folder. The `applied/` archive subdir (and anything below it) is ignored."""
+    gdir = os.path.join(cfg["vault"], cfg["gardener_dir"])
     if not os.path.isdir(gdir):
         return []
     return sorted(
@@ -1488,7 +1499,7 @@ def cmd_apply(cfg, args):
     if args.file:
         path = args.file
         if not os.path.exists(path):
-            alt = os.path.join(cfg["vault"], "_workspace", "gardener", path)
+            alt = os.path.join(cfg["vault"], cfg["gardener_dir"], path)
             if os.path.exists(alt):
                 path = alt
         if not os.path.exists(path):

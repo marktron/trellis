@@ -338,10 +338,10 @@ class TestArchiveReview(unittest.TestCase):
 
 
 class TestPendingReviews(unittest.TestCase):
-    def _vault_with(self, *review_names, applied=()):
+    def _vault_with(self, *review_names, applied=(), gardener_dir="_workspace/gardener"):
         import tempfile
         vault = tempfile.mkdtemp()
-        gdir = os.path.join(vault, "_workspace", "gardener")
+        gdir = os.path.join(vault, gardener_dir)
         os.makedirs(gdir)
         for name in review_names:
             with open(os.path.join(gdir, name), "w") as fh:
@@ -353,10 +353,13 @@ class TestPendingReviews(unittest.TestCase):
                     fh.write("done")
         return vault, gdir
 
+    def _cfg(self, vault, gardener_dir="_workspace/gardener"):
+        return {"vault": vault, "gardener_dir": gardener_dir}
+
     def test_lists_top_level_md_sorted(self):
         vault, gdir = self._vault_with("2026-06-16.md", "2026-06-15.md")
         self.assertEqual(
-            t._pending_reviews({"vault": vault}),
+            t._pending_reviews(self._cfg(vault)),
             [os.path.join(gdir, "2026-06-15.md"),
              os.path.join(gdir, "2026-06-16.md")],
         )
@@ -366,13 +369,41 @@ class TestPendingReviews(unittest.TestCase):
         with open(os.path.join(gdir, "notes.txt"), "w") as fh:
             fh.write("nope")
         self.assertEqual(
-            t._pending_reviews({"vault": vault}),
+            t._pending_reviews(self._cfg(vault)),
             [os.path.join(gdir, "live.md")],
         )
 
     def test_missing_gardener_folder_returns_empty(self):
         import tempfile
-        self.assertEqual(t._pending_reviews({"vault": tempfile.mkdtemp()}), [])
+        self.assertEqual(t._pending_reviews(self._cfg(tempfile.mkdtemp())), [])
+
+    def test_respects_configured_gardener_dir(self):
+        vault, gdir = self._vault_with("r.md", gardener_dir="reviews/queue")
+        self.assertEqual(
+            t._pending_reviews(self._cfg(vault, "reviews/queue")),
+            [os.path.join(gdir, "r.md")],
+        )
+        # the default location is NOT consulted when the config points elsewhere
+        self.assertEqual(t._pending_reviews(self._cfg(vault)), [])
+
+
+class TestDatedReportPath(unittest.TestCase):
+    def test_creates_dir_and_returns_dated_path(self):
+        import tempfile
+        out_dir = os.path.join(tempfile.mkdtemp(), "reports", "nested")
+        path = t._dated_report_path(out_dir, "2026-07-13")
+        self.assertTrue(os.path.isdir(out_dir))
+        self.assertEqual(path, os.path.join(out_dir, "2026-07-13.md"))
+
+    def test_existing_report_gets_timestamp_suffix(self):
+        import tempfile
+        out_dir = tempfile.mkdtemp()
+        with open(os.path.join(out_dir, "2026-07-13.md"), "w") as fh:
+            fh.write("earlier run")
+        path = t._dated_report_path(out_dir, "2026-07-13")
+        base = os.path.basename(path)
+        self.assertNotEqual(base, "2026-07-13.md")     # no clobber
+        self.assertTrue(base.startswith("2026-07-13-") and base.endswith(".md"))
 
 
 class TestGeneratePayload(unittest.TestCase):
@@ -446,9 +477,41 @@ class TestClusterHelpers(unittest.TestCase):
             "z/other.md": {"title": "other", "out": {"moats"}},  # not a MOC source
         }
         t2r, _ = t.build_link_graph(notes)
-        linked = t.moc_linked_targets(notes, t2r)
+        linked = t.moc_linked_targets(notes, t2r, ("MOCs/",))
         self.assertIn("z/moats.md", linked)          # linked from the MOC
         self.assertEqual(len(linked), 1)             # the z/ source doesn't count
+
+    def test_moc_linked_targets_custom_prefix(self):
+        notes = {
+            "Maps/Cycling.md": {"title": "Cycling", "out": {"vo2max"}},
+            "MOCs/Old.md": {"title": "Old", "out": {"moats"}},   # outside custom scope
+            "z/vo2max.md": {"title": "vo2max", "out": set()},
+            "z/moats.md": {"title": "moats", "out": set()},
+        }
+        t2r, _ = t.build_link_graph(notes)
+        linked = t.moc_linked_targets(notes, t2r, ("Maps/",))
+        self.assertEqual(linked, {"z/vo2max.md"})
+
+    def test_moc_linked_targets_multiple_prefixes(self):
+        notes = {
+            "Maps/Cycling.md": {"title": "Cycling", "out": {"vo2max"}},
+            "MOCs/Strategy.md": {"title": "Strategy", "out": {"moats"}},
+            "z/vo2max.md": {"title": "vo2max", "out": set()},
+            "z/moats.md": {"title": "moats", "out": set()},
+        }
+        t2r, _ = t.build_link_graph(notes)
+        linked = t.moc_linked_targets(notes, t2r, ("Maps/", "MOCs/"))
+        self.assertEqual(linked, {"z/vo2max.md", "z/moats.md"})
+
+    def test_moc_linked_targets_prefix_is_folder_not_stem(self):
+        # "MOCs/" must not match a stray root file whose name merely starts
+        # with "MOCs" (the old startswith("MOCs") behavior did).
+        notes = {
+            "MOCs archive.md": {"title": "MOCs archive", "out": {"moats"}},
+            "z/moats.md": {"title": "moats", "out": set()},
+        }
+        t2r, _ = t.build_link_graph(notes)
+        self.assertEqual(t.moc_linked_targets(notes, t2r, ("MOCs/",)), set())
 
     def test_link_coverage_fraction(self):
         self.assertEqual(t.link_coverage(["a", "b", "c", "d"], {"a", "c"}), 0.5)

@@ -29,6 +29,9 @@ gen_timeout     = 120                # seconds per generation before skipping a 
 gen_num_predict = 1024               # output token cap (prevents greedy runaway)
 garden_scope    = ["z/"]             # path prefixes the gardener processes (adjust to your structure)
 garden_limit    = 30                 # max notes per run (0 = no cap)
+# Where review queues are written, relative to the vault. Keep it under a folder
+# listed in exclude_dirs, or trellis will index its own review files.
+# gardener_dir  = "_workspace/gardener"
 link_candidates      = 8             # semantic neighbors considered per note
 max_link_suggestions = 5             # cap accepted links per note
 # Cold-start: a note's first gardening pass (or any note with <= link_thin_threshold
@@ -55,6 +58,12 @@ tag_candidate_neighbors = 15         # neighbors whose tags form the candidate v
 
 # --- auto-MOC clustering (phase 3) ---
 cluster_scope            = ["z/"]
+# Path prefixes holding your Maps of Content — the coverage reference that keeps
+# already-mapped themes from being re-suggested as candidates.
+# moc_scope              = ["MOCs/"]
+# Where candidate reports are written, relative to the vault. Same caveat as
+# gardener_dir: keep it under a folder listed in exclude_dirs.
+# clusters_dir           = "_workspace/clusters"
 umap_components          = 5
 umap_neighbors           = 15
 umap_min_dist            = 0.0

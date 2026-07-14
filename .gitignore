@@ -7,3 +7,5 @@ __pycache__/
 trellis.toml
 .DS_Store
 *.log
+build/
+*.egg-info/

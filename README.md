@@ -1,5 +1,7 @@
 # 🌿 Trellis
 
+[![tests](https://github.com/marktron/trellis/actions/workflows/tests.yml/badge.svg)](https://github.com/marktron/trellis/actions/workflows/tests.yml)
+
 A local-LLM gardener for an Obsidian vault. Structure for your notes to grow on.
 
 Everything runs locally against [Ollama](https://ollama.com). No note ever leaves
@@ -136,7 +138,9 @@ because a daily note doesn't need to be woven into the graph the way a permanent
 note does.
 
 The `z/` folder is my personal preference for storing Zettelkasten-style notes; most vaults don't have one. If yours is
-laid out differently, you adapt trellis by changing a handful of variables, and you might be well-served by pointing your LLM agent of choice to this repo, and asking it to customize the code for you based on your setup and personal preferences.
+laid out differently, everything vault-shaped is a config variable — no code
+changes needed. If you're unsure what to set, pointing your LLM agent of choice
+at this repo and your vault and asking it to write your `trellis.toml` works well.
 
 ### What to change for your setup
 
@@ -145,6 +149,9 @@ laid out differently, you adapt trellis by changing a handful of variables, and 
 | `vault` | absolute path to your vault | always (or set `TRELLIS_VAULT`) |
 | `garden_scope` | folder prefixes the gardener tends | your knowledge notes live somewhere other than `z/` |
 | `cluster_scope` | folders auto-MOC detection clusters | same — point it at your evergreen notes |
+| `moc_scope` | folders holding your Maps of Content | your topic landing pages live somewhere other than `MOCs/` |
+| `gardener_dir` | where review queues are written (vault-relative) | you want them somewhere other than `_workspace/gardener/` — keep it under an excluded folder |
+| `clusters_dir` | where MOC-candidate reports are written | same caveat as `gardener_dir` |
 | `exclude_dirs` | folders never indexed, matched by name at any depth | you keep other non-knowledge folders (attachments, archives, journals) |
 | `embed_model` | the Ollama embedding model | you want more recall (`:4b`) or a smaller footprint (`embeddinggemma`) |
 | `gen_model` | the model that judges link/tag suggestions | you prefer a different local model |
