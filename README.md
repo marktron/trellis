@@ -25,10 +25,36 @@ files of suggestions, and only what you check off gets applied.
   dated candidate report to `_workspace/clusters/` with a ready-to-run
   `/moc` line each.
 
+## Install
+
+With [pipx](https://pipx.pypa.io) (or `uv tool install`):
+
+```sh
+pipx install 'trellis-vault @ git+https://github.com/marktron/trellis'
+```
+
+That puts a `trellis` command on your PATH. To also get the clustering
+dependencies (only needed for `trellis cluster`):
+
+```sh
+pipx install 'trellis-vault[cluster] @ git+https://github.com/marktron/trellis'
+```
+
+Or clone and run from a checkout — the whole tool is one file:
+
+```sh
+git clone https://github.com/marktron/trellis
+cd trellis && pip install numpy
+python3 trellis.py --help
+```
+
+The examples below use the installed `trellis` command; from a checkout,
+substitute `python3 trellis.py`.
+
 ## Requirements
 
-- Python 3.11+ with `numpy` (`pip install numpy`). The core commands (`index`,
-  `search`, `garden`) are otherwise standard library only.
+- Python 3.11+. Core commands (`index`, `search`, `garden`) need only `numpy`,
+  which installs automatically.
 - Ollama running, with **two** models pulled — an embedding model (used by
   everything) and a generation model (used by `garden` and `cluster` to judge
   suggestions):
@@ -43,17 +69,17 @@ files of suggestions, and only what you check off gets applied.
   — set `gen_model` in `trellis.toml` (or pass `--gen-model`). Both models are
   yours to choose; see [Model notes](#model-notes) for the trade-offs.
 
-- **Clustering (`cluster`) only** needs extra libraries in a venv:
+- **Clustering (`cluster`) only** needs extra libraries — installed via the
+  `[cluster]` extra (see Install), or in a checkout via a venv:
 
   ```sh
   python3 -m venv .venv
   .venv/bin/python3 -m pip install -r requirements.txt   # numpy, scikit-learn, umap-learn, hdbscan
   ```
 
-  `umap`/`hdbscan` are imported lazily, so the other commands keep working on
-  bare system-python + numpy. Run any command via `.venv/bin/python3` once the
-  venv exists. (`requirements.txt` includes `numpy`, so installing it in the
-  venv covers the core dependency too.)
+  `umap`/`hdbscan` are imported lazily, so the other commands keep working
+  without them. In a checkout, run commands via `.venv/bin/python3` once the
+  venv exists.
 
 ## Platform & performance
 
@@ -79,13 +105,17 @@ Memory is dominated by whatever generation model Ollama loads — see
 
 ## Configuration
 
-Copy the example config and point it at your vault:
+Copy [`trellis.toml.example`](trellis.toml.example) to `trellis.toml` and point
+it at your vault. Trellis looks for the file in this order, first hit wins:
 
-```sh
-cp trellis.toml.example trellis.toml
-```
+1. `$TRELLIS_CONFIG` (explicit path)
+2. `./trellis.toml` (current directory)
+3. next to `trellis.py` (a repo checkout — it's gitignored there, so your paths
+   stay local)
+4. `~/.config/trellis/trellis.toml` — the natural home when installed via pipx
 
-`trellis.toml` is gitignored, so your paths stay local. CLI flags override the
+The index database defaults to `index.db` beside whichever config file was
+found (override with `db_path` in the config or `--db`). CLI flags override the
 file, and you can set the vault out-of-band with `TRELLIS_VAULT=/path/to/vault`.
 
 ### How my vault is laid out
@@ -129,22 +159,22 @@ one place. `exclude_dirs` matches on folder name anywhere in the tree, so adding
 ## Usage
 
 ```sh
-python3 trellis.py index               # incremental (re)index — only embeds changed notes
-python3 trellis.py index --rebuild     # force a full re-embed
-python3 trellis.py search "spaced repetition for habits"
-python3 trellis.py neighbors "Dichotomy of Control"   # related-note preview
-python3 trellis.py status
+trellis index               # incremental (re)index — only embeds changed notes
+trellis index --rebuild     # force a full re-embed
+trellis search "spaced repetition for habits"
+trellis neighbors "Dichotomy of Control"   # related-note preview
+trellis status
 ```
 
 ### Gardener
 
 ```sh
-python3 trellis.py garden                  # tend up to `garden_limit` notes -> dated review queue
-python3 trellis.py garden --dry-run        # print the report, write nothing
-python3 trellis.py garden --limit 0        # no cap — drains the whole backlog (~3h for 877 notes)
-python3 trellis.py garden --scope z/,MOCs  # restrict to path prefixes
-python3 trellis.py garden --force          # re-garden notes even if unchanged
-python3 trellis.py garden --note "VO2max"  # garden one note (title or path); implies --force
+trellis garden                  # tend up to `garden_limit` notes -> dated review queue
+trellis garden --dry-run        # print the report, write nothing
+trellis garden --limit 0        # no cap — drains the whole backlog (~3h for 877 notes)
+trellis garden --scope z/,MOCs  # restrict to path prefixes
+trellis garden --force          # re-garden notes even if unchanged
+trellis garden --note "VO2max"  # garden one note (title or path); implies --force
 ```
 
 Reports land in `<vault>/_workspace/gardener/YYYY-MM-DD.md` as checkbox lists —
@@ -180,10 +210,10 @@ After checking the boxes you want in a review file (and editing tag lists / link
 freely — the apply step reads the file as edited, not the original suggestions):
 
 ```sh
-python3 trellis.py apply 2026-06-15.md            # bare filename resolves in _workspace/gardener/
-python3 trellis.py apply 2026-06-15.md --dry-run  # preview; writes nothing
-python3 trellis.py apply                          # no file → apply every pending review in _workspace/gardener/
-python3 trellis.py apply --dry-run                # preview all pending reviews
+trellis apply 2026-06-15.md            # bare filename resolves in _workspace/gardener/
+trellis apply 2026-06-15.md --dry-run  # preview; writes nothing
+trellis apply                          # no file → apply every pending review in _workspace/gardener/
+trellis apply --dry-run                # preview all pending reviews
 ```
 
 With no file argument, `apply` processes every top-level `.md` in the gardener
@@ -215,15 +245,15 @@ to apply nothing and leave the file in place.
 ### Auto-MOC detection
 
 Finds dense thematic clusters in `z/` that no MOC covers yet, and writes them as
-candidates you can build with the `/moc` skill. Requires the venv (see
-Requirements above).
+candidates you can build with the `/moc` skill. Requires the clustering
+libraries — the `[cluster]` extra, or the venv in a checkout (see Install).
 
 ```sh
-.venv/bin/python3 trellis.py cluster              # detect candidates -> review report
-.venv/bin/python3 trellis.py cluster --dry-run    # print the report, write nothing
-.venv/bin/python3 trellis.py cluster --limit 10   # cap candidates named/reported this run
-.venv/bin/python3 trellis.py cluster --scope z/,Areas  # restrict to path prefixes
-.venv/bin/python3 trellis.py cluster --force      # ignore the seen-ledger
+trellis cluster              # detect candidates -> review report
+trellis cluster --dry-run    # print the report, write nothing
+trellis cluster --limit 10   # cap candidates named/reported this run
+trellis cluster --scope z/,Areas  # restrict to path prefixes
+trellis cluster --force      # ignore the seen-ledger
 ```
 
 Reports land in `<vault>/_workspace/clusters/YYYY-MM-DD.md`. Each candidate
@@ -238,7 +268,8 @@ counts as covered if it's semantically close to an MOC (`cover_sim_threshold`)
 to warrant nightly runs. The dials worth tuning are `cover_sim_threshold`,
 `moc_link_cover_threshold`, and `hdbscan_min_cluster_size`.
 
-Optional convenience alias:
+Running from a checkout instead of an install? A shell alias gives you the same
+ergonomics:
 
 ```sh
 alias trellis='~/Developer/trellis/.venv/bin/python3 ~/Developer/trellis/trellis.py'

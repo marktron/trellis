@@ -28,6 +28,8 @@ import urllib.request
 
 import numpy as np
 
+__version__ = "0.1.0"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # --------------------------------------------------------------------------- #
@@ -38,7 +40,8 @@ DEFAULTS = {
     # TRELLIS_VAULT environment variable.
     "vault": os.environ.get("TRELLIS_VAULT", ""),
     "embed_model": "qwen3-embedding:0.6b",
-    "db_path": os.path.join(HERE, "index.db"),
+    # db_path has no static default here — it depends on where trellis.toml (if
+    # any) was found; see _config_path() and load_config().
     "ollama_url": "http://localhost:11434",
     "exclude_dirs": [
         ".obsidian", ".trash", ".git", "node_modules",
@@ -93,16 +96,57 @@ QWEN_QUERY_INSTRUCT = (
 )
 
 
+def _config_path() -> str | None:
+    """Locate trellis.toml, first hit wins:
+
+    1. $TRELLIS_CONFIG (explicit path; if set but missing, warn and keep looking)
+    2. ./trellis.toml (current working directory)
+    3. <HERE>/trellis.toml (repo-checkout behavior, preserved for existing users)
+    4. $XDG_CONFIG_HOME/trellis/trellis.toml, falling back to ~/.config/trellis/trellis.toml
+
+    Returns None if none of the above exist.
+    """
+    env_path = os.environ.get("TRELLIS_CONFIG")
+    if env_path:
+        if os.path.exists(env_path):
+            return env_path
+        print(f"warning: TRELLIS_CONFIG={env_path} does not exist; "
+              "continuing config search", file=sys.stderr)
+
+    cwd_path = os.path.join(os.getcwd(), "trellis.toml")
+    if os.path.exists(cwd_path):
+        return cwd_path
+
+    here_path = os.path.join(HERE, "trellis.toml")
+    if os.path.exists(here_path):
+        return here_path
+
+    xdg_base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config")
+    xdg_path = os.path.join(xdg_base, "trellis", "trellis.toml")
+    if os.path.exists(xdg_path):
+        return xdg_path
+
+    return None
+
+
 def load_config(cli_overrides: dict) -> dict:
     cfg = dict(DEFAULTS)
-    toml_path = os.path.join(HERE, "trellis.toml")
-    if os.path.exists(toml_path):
+    toml_path = _config_path()
+    # Default db_path lives next to whatever config file was found (so an
+    # installed user's db sits next to their config); with no config file
+    # found anywhere, fall back to the repo-checkout behavior (HERE/index.db).
+    # A db_path key from the TOML itself, or --db on the CLI, still wins below.
+    cfg["db_path"] = (os.path.join(os.path.dirname(toml_path), "index.db")
+                       if toml_path else os.path.join(HERE, "index.db"))
+    if toml_path:
         try:
             import tomllib
             with open(toml_path, "rb") as fh:
                 cfg.update({k: v for k, v in tomllib.load(fh).items() if v is not None})
         except Exception as e:  # noqa: BLE001
-            print(f"warning: could not read trellis.toml ({e}); using defaults", file=sys.stderr)
+            print(f"warning: could not read trellis.toml ({toml_path}): {e}; "
+                  "using defaults", file=sys.stderr)
     cfg.update({k: v for k, v in cli_overrides.items() if v is not None})
     return cfg
 
@@ -1570,6 +1614,7 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
 def main(argv=None):
     p = argparse.ArgumentParser(prog="trellis", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--vault", help="path to the Obsidian vault")
     p.add_argument("--embed-model", dest="embed_model", help="Ollama embedding model")
     p.add_argument("--db", dest="db_path", help="path to the index database")

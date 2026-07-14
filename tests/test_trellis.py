@@ -699,5 +699,151 @@ class TestMergeFrontmatterTags(unittest.TestCase):
             t.extract_tags(t.split_frontmatter(out)[0]), ["zeta", "alpha", "gamma", "beta"])
 
 
+class TestConfigPath(unittest.TestCase):
+    """_config_path() search order + load_config() db_path defaults.
+
+    Isolated from the ambient (gitignored) repo trellis.toml by patching
+    t.HERE to a fresh temp dir per test, and from the real TRELLIS_CONFIG /
+    XDG_CONFIG_HOME / HOME env vars by saving and restoring them. Tests must
+    pass whether or not a real trellis.toml or ~/.config/trellis/trellis.toml
+    happens to exist on the machine running them.
+    """
+
+    def setUp(self):
+        import tempfile
+        self._orig_cwd = os.getcwd()
+        self._orig_here = t.HERE
+        self._orig_env = {k: os.environ.get(k) for k in
+                           ("TRELLIS_CONFIG", "XDG_CONFIG_HOME", "HOME")}
+        for k in self._orig_env:
+            os.environ.pop(k, None)
+        t.HERE = tempfile.mkdtemp()  # empty repo-checkout dir by default
+
+    def tearDown(self):
+        os.chdir(self._orig_cwd)
+        t.HERE = self._orig_here
+        for k, v in self._orig_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    @staticmethod
+    def _write_toml(path, content=""):
+        with open(path, "w") as fh:
+            fh.write(content)
+
+    def test_missing_everything_returns_none_and_db_defaults_to_here(self):
+        import tempfile
+        os.chdir(tempfile.mkdtemp())
+        os.environ["HOME"] = tempfile.mkdtemp()  # no .config/trellis here
+        self.assertIsNone(t._config_path())
+        cfg = t.load_config({})
+        self.assertEqual(cfg["db_path"], os.path.join(t.HERE, "index.db"))
+
+    def test_cwd_beats_here(self):
+        import tempfile
+        self._write_toml(os.path.join(t.HERE, "trellis.toml"))
+        cwd_dir = os.path.realpath(tempfile.mkdtemp())
+        self._write_toml(os.path.join(cwd_dir, "trellis.toml"))
+        os.chdir(cwd_dir)
+        self.assertEqual(t._config_path(), os.path.join(cwd_dir, "trellis.toml"))
+
+    def test_here_beats_xdg(self):
+        import tempfile
+        self._write_toml(os.path.join(t.HERE, "trellis.toml"))
+        os.chdir(tempfile.mkdtemp())  # no trellis.toml in cwd
+        xdg_dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(xdg_dir, "trellis"))
+        self._write_toml(os.path.join(xdg_dir, "trellis", "trellis.toml"))
+        os.environ["XDG_CONFIG_HOME"] = xdg_dir
+        self.assertEqual(t._config_path(), os.path.join(t.HERE, "trellis.toml"))
+
+    def test_xdg_fallback_with_xdg_config_home_set(self):
+        import tempfile
+        os.chdir(tempfile.mkdtemp())  # cwd and HERE both empty
+        xdg_dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(xdg_dir, "trellis"))
+        expected = os.path.join(xdg_dir, "trellis", "trellis.toml")
+        self._write_toml(expected)
+        os.environ["XDG_CONFIG_HOME"] = xdg_dir
+        self.assertEqual(t._config_path(), expected)
+
+    def test_xdg_fallback_without_xdg_config_home_set(self):
+        import tempfile
+        os.chdir(tempfile.mkdtemp())
+        fake_home = tempfile.mkdtemp()
+        os.environ["HOME"] = fake_home
+        os.makedirs(os.path.join(fake_home, ".config", "trellis"))
+        expected = os.path.join(fake_home, ".config", "trellis", "trellis.toml")
+        self._write_toml(expected)
+        self.assertEqual(t._config_path(), expected)
+
+    def test_env_var_wins_over_everything(self):
+        import tempfile
+        self._write_toml(os.path.join(t.HERE, "trellis.toml"))
+        cwd_dir = tempfile.mkdtemp()
+        self._write_toml(os.path.join(cwd_dir, "trellis.toml"))
+        os.chdir(cwd_dir)
+        env_dir = tempfile.mkdtemp()
+        expected = os.path.join(env_dir, "explicit.toml")
+        self._write_toml(expected)
+        os.environ["TRELLIS_CONFIG"] = expected
+        self.assertEqual(t._config_path(), expected)
+
+    def test_trellis_config_missing_file_warns_and_falls_through(self):
+        import tempfile, io, contextlib
+        cwd_dir = os.path.realpath(tempfile.mkdtemp())
+        expected = os.path.join(cwd_dir, "trellis.toml")
+        self._write_toml(expected)
+        os.chdir(cwd_dir)
+        missing = os.path.join(tempfile.mkdtemp(), "does-not-exist.toml")
+        os.environ["TRELLIS_CONFIG"] = missing
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            result = t._config_path()
+        self.assertEqual(result, expected)
+        self.assertIn("TRELLIS_CONFIG", buf.getvalue())
+
+    def test_db_defaults_next_to_found_config(self):
+        import tempfile
+        cwd_dir = os.path.realpath(tempfile.mkdtemp())
+        self._write_toml(os.path.join(cwd_dir, "trellis.toml"))
+        os.chdir(cwd_dir)
+        cfg = t.load_config({})
+        self.assertEqual(cfg["db_path"], os.path.join(cwd_dir, "index.db"))
+
+    def test_explicit_db_path_in_toml_respected(self):
+        import tempfile
+        cwd_dir = tempfile.mkdtemp()
+        self._write_toml(os.path.join(cwd_dir, "trellis.toml"),
+                          'db_path = "/custom/somewhere/index.db"\n')
+        os.chdir(cwd_dir)
+        cfg = t.load_config({})
+        self.assertEqual(cfg["db_path"], "/custom/somewhere/index.db")
+
+    def test_cli_db_flag_overrides_toml(self):
+        import tempfile
+        cwd_dir = tempfile.mkdtemp()
+        self._write_toml(os.path.join(cwd_dir, "trellis.toml"),
+                          'db_path = "/from/toml.db"\n')
+        os.chdir(cwd_dir)
+        cfg = t.load_config({"db_path": "/from/cli.db"})
+        self.assertEqual(cfg["db_path"], "/from/cli.db")
+
+    def test_malformed_toml_warns_with_path(self):
+        import tempfile, io, contextlib
+        cwd_dir = os.path.realpath(tempfile.mkdtemp())
+        bad_path = os.path.join(cwd_dir, "trellis.toml")
+        self._write_toml(bad_path, "vault = \n")  # invalid TOML (no value)
+        os.chdir(cwd_dir)
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            cfg = t.load_config({})
+        self.assertIn("could not read trellis.toml", buf.getvalue())
+        self.assertIn(bad_path, buf.getvalue())
+        self.assertEqual(cfg["db_path"], os.path.join(cwd_dir, "index.db"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

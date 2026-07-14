@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69.5"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trellis-vault"
+version = "0.1.0"
+description = "Local-LLM gardener for Zettelkasten-style Obsidian vaults."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+keywords = ["obsidian", "zettelkasten", "ollama", "local-llm", "pkm"]
+dependencies = [
+    "numpy",
+]
+
+[project.urls]
+Homepage = "https://github.com/marktron/trellis"
+Repository = "https://github.com/marktron/trellis"
+
+[project.optional-dependencies]
+cluster = [
+    "scikit-learn",
+    "umap-learn",
+    "hdbscan",
+]
+
+[project.scripts]
+trellis = "trellis:main"
+
+[tool.setuptools]
+py-modules = ["trellis"]
