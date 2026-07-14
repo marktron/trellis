@@ -3,7 +3,10 @@
 A local-LLM gardener for an Obsidian vault. Structure for your notes to grow on.
 
 Everything runs locally against [Ollama](https://ollama.com). No note ever leaves
-the machine.
+the machine. Trellis never edits your notes directly — it writes dated review
+files of suggestions, and only what you check off gets applied.
+
+![A gardener review file in Obsidian: checkbox lists of suggested links between notes, each with a one-line rationale](docs/gardener-review.png)
 
 ## Features
 
@@ -113,7 +116,9 @@ python3 trellis.py garden --force          # re-garden notes even if unchanged
 python3 trellis.py garden --note "VO2max"  # garden one note (title or path); implies --force
 ```
 
-Reports land in `<vault>/_workspace/gardener/YYYY-MM-DD.md` as checkbox lists.
+Reports land in `<vault>/_workspace/gardener/YYYY-MM-DD.md` as checkbox lists —
+see [`examples/gardener-review-example.md`](examples/gardener-review-example.md)
+for what one looks like.
 Two ledgers in the DB make repeat runs cheap and quiet: `garden_state` skips
 notes unchanged since they were last gardened, and `suggestions` prevents
 re-surfacing an idea you've already seen. Notes are processed
@@ -153,6 +158,8 @@ python3 trellis.py apply --dry-run                # preview all pending reviews
 With no file argument, `apply` processes every top-level `.md` in the gardener
 folder (the `applied/` archive is skipped), applying and retiring each in turn and
 printing a combined total at the end.
+
+![A note in Obsidian with a "Connected notes added by Trellis" section of links appended at the end](docs/added-by-trellis.png)
 
 Links are folded into a single `### Connected notes added by Trellis` section at
 the end of each source note (one section per note — repeat runs merge into it
