@@ -18,7 +18,7 @@ files of suggestions, and only what you check off gets applied.
   `_workspace/gardener/` — never edits notes directly.
 - **Apply step** — read back the checked boxes in a review file and apply
   approved tags/links to notes (links append to the body; tags fold into
-  frontmatter via the vault's idempotent `migrate_tags`).
+  YAML frontmatter).
 - **Auto-MOC detection** — cluster `z/` (UMAP → HDBSCAN), test each cluster
   against existing MOCs (centroid vs. MOC embeddings, plus how much is already
   MOC-linked), name the uncovered ones with the local gen model, and emit a
@@ -29,11 +29,19 @@ files of suggestions, and only what you check off gets applied.
 
 - Python 3.11+ with `numpy` (`pip install numpy`). The core commands (`index`,
   `search`, `garden`) are otherwise standard library only.
-- Ollama running with an embedding model pulled:
+- Ollama running, with **two** models pulled — an embedding model (used by
+  everything) and a generation model (used by `garden` and `cluster` to judge
+  suggestions):
 
   ```sh
   ollama pull qwen3-embedding:0.6b
+  ollama pull qwen3.6:35b-a3b
   ```
+
+  The default generation model is a 35B MoE that wants ~48 GB of memory. On a
+  smaller machine, pull a lower-parameter model instead and point trellis at it
+  — set `gen_model` in `trellis.toml` (or pass `--gen-model`). Both models are
+  yours to choose; see [Model notes](#model-notes) for the trade-offs.
 
 - **Clustering (`cluster`) only** needs extra libraries in a venv:
 
@@ -44,7 +52,30 @@ files of suggestions, and only what you check off gets applied.
 
   `umap`/`hdbscan` are imported lazily, so the other commands keep working on
   bare system-python + numpy. Run any command via `.venv/bin/python3` once the
-  venv exists.
+  venv exists. (`requirements.txt` includes `numpy`, so installing it in the
+  venv covers the core dependency too.)
+
+## Platform & performance
+
+Trellis is built and daily-driven on **macOS**. Two pieces are macOS-only: the
+nightly scheduler (launchd plus a zsh wrapper) and the iCloud handling
+(dataless files are hydrated via `brctl download`). Everything else is plain
+Python and numpy, so the CLI should run on Linux or Windows with your own
+scheduler (cron, systemd timers, Task Scheduler) — but that path is untested.
+
+What to expect, timing-wise, on an M-series Mac with the default models:
+
+- **Indexing** is incremental — only new and changed notes get embedded, so
+  after the first full index a nightly refresh touches a handful of notes.
+- **Gardening** is the slow part: the generation model judges each note's
+  candidate links, roughly 12 seconds per note with the default 35B MoE. The
+  default `garden_limit = 30` keeps a nightly run to a few minutes; draining a
+  big backlog takes hours (`--limit 0` over ~900 notes ran about 3 h).
+- **Clustering** reuses stored embeddings; most of its time goes to naming
+  uncovered clusters with the generation model.
+
+Memory is dominated by whatever generation model Ollama loads — see
+[Model notes](#model-notes) for choosing one that fits your machine.
 
 ## Configuration
 
@@ -164,10 +195,10 @@ printing a combined total at the end.
 Links are folded into a single `### Connected notes added by Trellis` section at
 the end of each source note (one section per note — repeat runs merge into it
 rather than stacking dated blocks, and legacy `Added by Claude on <date>:` blocks
-are absorbed into it). Tags are folded into YAML frontmatter via the vault's
-`migrate_tags.migrate_content`. Already-present links/tags are skipped (safe to
-re-run), and applied items are marked `status='applied'` in the ledger. Tag
-application is skipped with a warning if `migrate_tags.py` can't be loaded (links
+are absorbed into it). Tags are folded into the note's YAML frontmatter, merging
+with any existing `tags:` field. Already-present links/tags are skipped (safe to
+re-run), and applied items are marked `status='applied'` in the ledger. A note
+with malformed frontmatter gets a warning and its tags are left unapplied (links
 still apply).
 
 These appended sections are stripped before embedding and before the gardener's

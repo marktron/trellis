@@ -628,5 +628,76 @@ class TestTrellisBlocks(unittest.TestCase):
         self.assertNotIn("Added by Claude on 2026-06-17", out)   # link marker converted
 
 
+class TestMergeFrontmatterTags(unittest.TestCase):
+    def test_no_frontmatter_prepends_block(self):
+        out = t.merge_frontmatter_tags("# Title\n\nBody text.\n", ["alpha", "beta"])
+        self.assertEqual(
+            out, "---\ntags:\n  - alpha\n  - beta\n---\n# Title\n\nBody text.\n")
+
+    def test_fm_without_tags_appends_field_other_keys_untouched(self):
+        content = "---\ntitle: Hello\nauthor: Mark\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["alpha"])
+        self.assertEqual(
+            out, "---\ntitle: Hello\nauthor: Mark\ntags:\n  - alpha\n---\nBody.\n")
+
+    def test_block_list_merge_dedupes(self):
+        content = "---\ntags:\n  - alpha\n  - beta\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["beta", "gamma"])
+        self.assertEqual(out, "---\ntags:\n  - alpha\n  - beta\n  - gamma\n---\nBody.\n")
+
+    def test_inline_list_merge(self):
+        content = "---\ntags: [alpha, beta]\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["gamma"])
+        self.assertEqual(out, "---\ntags:\n  - alpha\n  - beta\n  - gamma\n---\nBody.\n")
+
+    def test_empty_inline_list(self):
+        content = "---\ntags: []\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["alpha"])
+        self.assertEqual(out, "---\ntags:\n  - alpha\n---\nBody.\n")
+
+    def test_inline_single_value(self):
+        content = "---\ntags: solo\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["duo"])
+        self.assertEqual(out, "---\ntags:\n  - solo\n  - duo\n---\nBody.\n")
+
+    def test_quoted_existing_tags_unquoted(self):
+        content = '---\ntags: ["alpha", \'beta\']\n---\nBody.\n'
+        out = t.merge_frontmatter_tags(content, ["gamma"])
+        self.assertEqual(out, "---\ntags:\n  - alpha\n  - beta\n  - gamma\n---\nBody.\n")
+
+    def test_blank_line_inside_block_list(self):
+        content = "---\ntags:\n  - alpha\n\n  - beta\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["gamma"])
+        self.assertEqual(out, "---\ntags:\n  - alpha\n  - beta\n  - gamma\n---\nBody.\n")
+
+    def test_unclosed_frontmatter_returns_none(self):
+        content = "---\ntitle: Hello\nBody without closing delimiter.\n"
+        self.assertIsNone(t.merge_frontmatter_tags(content, ["alpha"]))
+
+    def test_preserves_trailing_newline_present(self):
+        content = "---\ntags:\n  - alpha\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["beta"])
+        self.assertTrue(out.endswith("\n"))
+        self.assertEqual(out, "---\ntags:\n  - alpha\n  - beta\n---\nBody.\n")
+
+    def test_preserves_trailing_newline_absent(self):
+        content = "---\ntags:\n  - alpha\n---\nBody."
+        out = t.merge_frontmatter_tags(content, ["beta"])
+        self.assertFalse(out.endswith("\n"))
+        self.assertEqual(out, "---\ntags:\n  - alpha\n  - beta\n---\nBody.")
+
+    def test_idempotent(self):
+        content = "---\ntags:\n  - alpha\n---\nBody.\n"
+        once = t.merge_frontmatter_tags(content, ["beta", "gamma"])
+        twice = t.merge_frontmatter_tags(once, ["beta", "gamma"])
+        self.assertEqual(once, twice)
+
+    def test_tag_order_existing_first_then_new(self):
+        content = "---\ntags:\n  - zeta\n  - alpha\n---\nBody.\n"
+        out = t.merge_frontmatter_tags(content, ["gamma", "beta"])
+        self.assertEqual(
+            t.extract_tags(t.split_frontmatter(out)[0]), ["zeta", "alpha", "gamma", "beta"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

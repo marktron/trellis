@@ -1294,21 +1294,6 @@ def parse_review(md: str) -> dict:
     return {"links": links, "tags": tags}
 
 
-def _load_migrate_content(cfg):
-    """Dynamically load the vault's idempotent tag-migration helper."""
-    import importlib.util
-    p = os.path.join(cfg["vault"], "_workspace", "scripts", "migrate_tags.py")
-    if not os.path.exists(p):
-        return None
-    try:
-        spec = importlib.util.spec_from_file_location("migrate_tags", p)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod.migrate_content
-    except Exception:  # noqa: BLE001
-        return None
-
-
 def _archive_review(path: str) -> str | None:
     """Move a processed review file into an `applied/` sibling dir so the
     gardener folder only shows pending reviews. Never clobbers; non-fatal."""
@@ -1347,6 +1332,96 @@ def consolidate_connected(content: str, new_targets) -> str:
     block = "\n".join(f"- [[{x}]]" for x in ordered)
     prefix = (base + "\n\n") if base else ""
     return f"{prefix}{CONNECTED_HEADER}\n{block}\n"
+
+
+_FM_TAGS_KEY_RE = re.compile(r"^tags\s*:")
+_FM_TAGS_INLINE_LIST_RE = re.compile(r"^tags\s*:\s*\[(.*)\]\s*$")
+_FM_TAGS_INLINE_VALUE_RE = re.compile(r"^tags\s*:\s*([^\s\[#].*?)\s*$")
+_FM_LIST_ITEM_RE = re.compile(r"^\s*-\s+(.+?)\s*$")
+
+
+def _find_tags_field(fm_lines: list[str]) -> tuple[list[str] | None, int | None, int | None]:
+    """Locate the `tags:` field within a list of frontmatter lines. Handles the
+    three shapes seen in the wild: block list, inline list (`[a, b]`, incl.
+    empty `[]`), and inline single value. Returns (tags, start, end) with `end`
+    exclusive, or (None, None, None) if there's no tags field at all."""
+    for i, line in enumerate(fm_lines):
+        if not _FM_TAGS_KEY_RE.match(line):
+            continue
+        m = _FM_TAGS_INLINE_LIST_RE.match(line)
+        if m:
+            inner = m.group(1).strip()
+            if not inner:
+                return [], i, i + 1
+            return [x.strip().strip("\"'") for x in inner.split(",") if x.strip()], i, i + 1
+        m = _FM_TAGS_INLINE_VALUE_RE.match(line)
+        if m:
+            return [m.group(1).strip().strip("\"'")], i, i + 1
+        # Block list form: tags:\n  - a\n  - b (blank lines inside are tolerated).
+        tags: list[str] = []
+        end = i + 1
+        for j in range(i + 1, len(fm_lines)):
+            item = _FM_LIST_ITEM_RE.match(fm_lines[j])
+            if item:
+                tags.append(item.group(1).strip().strip("\"'"))
+                end = j + 1
+            elif fm_lines[j].strip() == "":
+                end = j + 1
+            else:
+                break
+        return tags, i, end
+    return None, None, None
+
+
+def merge_frontmatter_tags(content: str, new_tags: list[str]) -> str | None:
+    """Merge `new_tags` into a note's frontmatter `tags:` field, order-preserving
+    and deduped (existing tags first), always writing the result back as a
+    2-space block list. Returns None if the frontmatter is malformed (an
+    opening `---` with no closing one) so the caller can skip tags for that
+    note rather than corrupt it. Body is never touched; trailing-newline
+    presence/absence is preserved.
+
+    A pure, stdlib-only reimplementation of the vault's migrate_tags.py merge
+    semantics — trellis ships this natively so tag application doesn't degrade
+    to links-only for anyone without that script on disk.
+    """
+    has_trailing_newline = content.endswith("\n")
+    raw_lines = content.split("\n")
+    if has_trailing_newline and raw_lines and raw_lines[-1] == "":
+        raw_lines = raw_lines[:-1]
+
+    if not raw_lines or raw_lines[0].strip() != "---":
+        # No frontmatter at all — prepend a brand-new block, body untouched.
+        block = "\n".join(["tags:"] + [f"  - {t}" for t in dict.fromkeys(new_tags)])
+        return f"---\n{block}\n---\n{content}"
+
+    close_idx = None
+    for i in range(1, len(raw_lines)):
+        if raw_lines[i].strip() == "---":
+            close_idx = i
+            break
+    if close_idx is None:
+        return None  # unclosed frontmatter — caller warns and skips tags
+
+    fm_lines = raw_lines[1:close_idx]
+    body_lines = raw_lines[close_idx + 1:]
+
+    existing_tags, start, end = _find_tags_field(fm_lines)
+    merged = list(dict.fromkeys((existing_tags or []) + new_tags))
+    tags_block = ["tags:"] + [f"  - {t}" for t in merged]
+
+    if start is not None:
+        new_fm_lines = fm_lines[:start] + tags_block + fm_lines[end:]
+    else:
+        new_fm_lines = list(fm_lines)
+        while new_fm_lines and new_fm_lines[-1].strip() == "":
+            new_fm_lines.pop()
+        new_fm_lines.extend(tags_block)
+
+    new_content = "\n".join(["---"] + new_fm_lines + ["---"] + body_lines)
+    if has_trailing_newline:
+        new_content += "\n"
+    return new_content
 
 
 def _pending_reviews(cfg) -> list[str]:
@@ -1425,11 +1500,6 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
         add_tags[s].extend(tg)
     sources = sorted(set(add_links) | set(add_tags))
 
-    migrate = _load_migrate_content(cfg) if any(add_tags.values()) else None
-    if add_tags and migrate is None:
-        print("warning: migrate_tags.py not loadable — tags will be SKIPPED "
-              "(links still applied)", file=sys.stderr)
-
     conn = connect(cfg["db_path"])
     _ensure_garden_tables(conn)
     applied_links = applied_tags = 0
@@ -1443,7 +1513,7 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
         new_links = [t for t in dict.fromkeys(add_links.get(s, []))
                      if t.lower() not in note["out"]]
         new_tags = [t for t in dict.fromkeys(add_tags.get(s, []))
-                    if migrate and t not in note["tags"]]
+                    if t not in note["tags"]]
         if not new_links and not new_tags:
             print(f"  = up to date: {s}")
             continue
@@ -1457,15 +1527,14 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
         else:
             full = os.path.join(cfg["vault"], rel)
             content = open(full, encoding="utf-8").read()
-            if new_tags:  # fold into frontmatter via the vault's migration trick
-                staged = content if content.endswith("\n") else content + "\n"
-                staged += "\n" + "\n".join(f"#{t}" for t in new_tags) + "\n"
-                migrated = migrate(staged)[0]
-                if migrated:
-                    content = migrated
-                else:
-                    print(f"  ! tag merge no-op for {s}; leaving tags", file=sys.stderr)
+            if new_tags:  # fold into frontmatter natively
+                merged = merge_frontmatter_tags(content, new_tags)
+                if merged is None:
+                    print(f"  ! tag merge failed for {s} (malformed frontmatter); "
+                          "leaving tags", file=sys.stderr)
                     new_tags = []
+                else:
+                    content = merged
             if new_links:  # fold into the single Connected-notes section
                 content = consolidate_connected(content, new_links)
             with open(full, "w", encoding="utf-8") as fh:
