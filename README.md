@@ -24,8 +24,9 @@ files of suggestions, and only what you check off gets applied.
   `Areas/Product Ideas/` files. Suggestions land in the same dated review file
   as the gardener's; `trellis apply` writes the checked ones.
 - **Apply step** — read back the checked boxes in a review file and apply
-  approved tags/links/MOC placements/idea links to notes (links append to the body;
-  tags fold into YAML frontmatter; MOC placements suggest a section to add a note to).
+  approved tags/links/MOC placements/idea links: tags fold into YAML frontmatter,
+  links append to the Connected-notes section, MOC placements insert the note link
+  into the chosen MOC section, and idea links append under Related-notes in the idea file.
 - **Auto-MOC detection** — cluster `z/` (UMAP → HDBSCAN), test each cluster
   against existing MOCs (centroid vs. MOC embeddings, plus how much is already
   MOC-linked), name the uncovered ones with the local gen model, and emit a
