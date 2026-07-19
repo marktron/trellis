@@ -986,5 +986,35 @@ class TestDetectNewNotes(unittest.TestCase):
         self.assertEqual(cands, ["z/sameday.md"])
 
 
+class TestTriageState(unittest.TestCase):
+    def _conn(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        t._ensure_triage_tables(conn)
+        return conn
+
+    def test_seed_imports_names_with_prefix_and_last_run(self):
+        conn = self._conn()
+        n = t.seed_triage_state(
+            conn, {"last_run_iso": "2026-07-12T09:00:00", "triaged": ["A.md", "B.md"]})
+        self.assertEqual(n, 2)
+        rows = {r[0] for r in conn.execute("SELECT path FROM triage_state")}
+        self.assertEqual(rows, {"z/A.md", "z/B.md"})
+        self.assertEqual(t.meta_get(conn, "triage_last_run"), "2026-07-12T09:00:00")
+
+    def test_seed_noop_when_state_exists(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO triage_state VALUES('z/X.md', 0)")
+        n = t.seed_triage_state(conn, {"last_run_iso": "2026-07-12T09:00:00",
+                                       "triaged": ["A.md"]})
+        self.assertEqual(n, 0)
+        self.assertIsNone(t.meta_get(conn, "triage_last_run"))
+
+    def test_seed_tolerates_missing_keys(self):
+        conn = self._conn()
+        self.assertEqual(t.seed_triage_state(conn, {}), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1035,6 +1035,28 @@ def _ensure_garden_tables(conn):
     conn.commit()
 
 
+def _ensure_triage_tables(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS triage_state (
+                        path TEXT PRIMARY KEY, triaged_at REAL)""")
+    conn.commit()
+
+
+def seed_triage_state(conn, state: dict, prefix: str = "z/") -> int:
+    """One-time import of the note-triage skill's _workspace/triage-state.json
+    (filenames + last_run_iso), so skill-era triaged notes are never reprocessed.
+    No-op once triage_state has any rows. Returns rows imported."""
+    if conn.execute("SELECT COUNT(*) FROM triage_state").fetchone()[0]:
+        return 0
+    names = state.get("triaged") or []
+    now = time.time()
+    conn.executemany("INSERT OR IGNORE INTO triage_state VALUES(?,?)",
+                     [(prefix + n, now) for n in names])
+    if state.get("last_run_iso"):
+        meta_set(conn, "triage_last_run", state["last_run_iso"])
+    conn.commit()
+    return len(names)
+
+
 def _scan_vault(vault, exclude, max_chars):
     """One pass: rel -> {title, tags, out, excerpt, hash}."""
     notes = {}
