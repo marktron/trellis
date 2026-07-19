@@ -1372,23 +1372,32 @@ def cmd_cluster(cfg, args):
 _CHECK_LINK_RE = re.compile(r"^-\s+\[[xX]\]\s+link\s*→\s*\[\[(.+?)\]\]")
 _CHECK_TAG_RE = re.compile(r"^-\s+\[[xX]\]\s+\[\[(.+?)\]\]\s*→\s*(.*)$")
 _SRC_HDR_RE = re.compile(r"^###\s+\[\[(.+?)\]\]")
+_CHECK_MOC_RE = re.compile(
+    r"^-\s+\[[xX]\]\s+\[\[(.+?)\]\]\s*→\s*\[\[(.+?)\]\]\s*§\s*(.+?)\s*—")
+_CHECK_IDEA_RE = re.compile(
+    r"^-\s+\[[xX]\]\s+\[\[(.+?)\]\]\s*→\s*\[\[(.+?)\]\]\s*—\s*(.*)$")
 
 
 def parse_review(md: str) -> dict:
     """Extract CHECKED items from a gardener review file.
 
-    Returns {"links": [(source, target)], "tags": [(source, [tags])]}.
+    Returns {"links": [(source, target)], "tags": [(source, [tags])],
+             "mocs": [(note, moc, section)], "ideas": [(note, idea, reason)]}.
     Unchecked ([ ]) items are ignored; the user's edits to the file win.
     """
     links: list[tuple[str, str]] = []
     tags: list[tuple[str, list[str]]] = []
+    mocs: list[tuple[str, str, str]] = []
+    ideas: list[tuple[str, str, str]] = []
     section = None
     src = None
     for line in md.splitlines():
         if line.startswith("## "):
             low = line.lower()
             section = ("link" if "link suggestion" in low
-                       else "tag" if "tag suggestion" in low else None)
+                       else "tag" if "tag suggestion" in low
+                       else "moc" if "moc placement" in low
+                       else "idea" if "idea link" in low else None)
             src = None
             continue
         if section == "link":
@@ -1405,7 +1414,17 @@ def parse_review(md: str) -> dict:
                 found = [x.strip() for x in re.findall(r"`([^`]+)`", m.group(2))]
                 if found:
                     tags.append((m.group(1).strip(), found))
-    return {"links": links, "tags": tags}
+        elif section == "moc":
+            m = _CHECK_MOC_RE.match(line)
+            if m:
+                mocs.append((m.group(1).strip(), m.group(2).strip(),
+                             m.group(3).strip()))
+        elif section == "idea":
+            m = _CHECK_IDEA_RE.match(line)
+            if m:
+                ideas.append((m.group(1).strip(), m.group(2).strip(),
+                              m.group(3).strip()))
+    return {"links": links, "tags": tags, "mocs": mocs, "ideas": ideas}
 
 
 def _archive_review(path: str) -> str | None:

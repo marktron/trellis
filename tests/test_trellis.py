@@ -336,6 +336,16 @@ class TestParseReview(unittest.TestCase):
 - [x] [[Note A]] → `health` `weight`
 - [ ] [[Note C]] → `ignored`
 
+## MOC placements
+
+- [x] [[Note A]] → [[Cycling MOC]] § Training physiology — mechanism note
+- [ ] [[Note B]] → [[Strategy MOC]] § Positioning — unchecked, ignore
+
+## Product idea links
+
+- [x] [[Note A]] → [[Training Load Dashboard]] — evidence for aerobic-base metric
+- [ ] [[Note B]] → [[Some Idea]] — unchecked, ignore
+
 ## Orphans in scope (5 total)
 
 - [[Some Orphan]]
@@ -356,6 +366,22 @@ class TestParseReview(unittest.TestCase):
         r = t.parse_review(self.SAMPLE)
         flat = [tgt for _, tgt in r["links"]]
         self.assertNotIn("Some Orphan", flat)
+
+    def test_moc_placements_only_checked(self):
+        r = t.parse_review(self.SAMPLE)
+        self.assertEqual(r["mocs"],
+                         [("Note A", "Cycling MOC", "Training physiology")])
+
+    def test_idea_links_only_checked_with_reason(self):
+        r = t.parse_review(self.SAMPLE)
+        self.assertEqual(r["ideas"],
+                         [("Note A", "Training Load Dashboard",
+                           "evidence for aerobic-base metric")])
+
+    def test_old_files_have_empty_new_keys(self):
+        r = t.parse_review("# Review — x\n\n## Link suggestions\n")
+        self.assertEqual(r["mocs"], [])
+        self.assertEqual(r["ideas"], [])
 
 
 class TestArchiveReview(unittest.TestCase):
