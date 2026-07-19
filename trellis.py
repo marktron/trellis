@@ -738,6 +738,47 @@ Return JSON only:
 {{"tags": ["<existing tag>", ...]}}"""
 
 
+MOC_PLACE_PROMPT = """You maintain Maps of Content (MOCs) for a Zettelkasten. \
+Decide whether the NOTE below clearly earns a place in this MOC, and if so \
+under which existing section. Be conservative: most notes do NOT belong in a \
+MOC; only place a note that is a strong fit for one specific section.
+
+MOC: "{moc}"
+SECTIONS:
+{sections}
+
+NOTE: "{title}"
+{excerpt}
+
+Return JSON only. section must be the exact text of one SECTIONS entry, or \
+null if the note does not clearly belong:
+{{"section": "<exact section text or null>", "reason": "<10 words max>"}}"""
+
+
+IDEA_PROMPT = """You evaluate whether a Zettelkasten NOTE genuinely helps a \
+PRODUCT IDEA — as evidence, positioning, or a competitive or philosophical \
+companion. Be conservative: answer false unless the connection is direct and \
+useful.
+
+PRODUCT IDEA: "{idea}"
+{idea_excerpt}
+
+NOTE: "{title}"
+{excerpt}
+
+Return JSON only:
+{{"related": true or false, "reason": "<10 words max>"}}"""
+
+
+_MOC_HEADING_RE = re.compile(r"(?m)^(#{2,3})\s+(.+?)\s*$")
+
+
+def moc_headings(body: str) -> list[str]:
+    """Text of the ##/### headings in a MOC body — the placement targets the
+    gen model chooses among."""
+    return [m.group(2) for m in _MOC_HEADING_RE.finditer(body)]
+
+
 def parse_outlinks(body: str) -> set[str]:
     """Return the set of wikilink targets in a note body, normalized to lowercase
     basenames (alias and #heading stripped)."""
@@ -1022,6 +1063,51 @@ def render_report(date_str: str, summary: dict, link_items: list, tag_items: lis
         L.append("")
     if not (link_items or tag_items):
         L.append("_No new suggestions this run._")
+    return "\n".join(L)
+
+
+def render_triage_report(date_str: str, summary: dict, tag_items: list,
+                         moc_items: list, idea_items: list,
+                         untouched: list, suspected: list) -> str:
+    """Render the triage half of the shared review file. Pure for testing."""
+    L = [f"# Review — {date_str}", ""]
+    L.append(f"_Triage: {summary['new_notes']} new note(s) · "
+             f"{summary['new_tags']} tag suggestion(s) · "
+             f"{summary['new_mocs']} MOC placement(s) · "
+             f"{summary['new_ideas']} idea link(s)._")
+    L.append("")
+    L.append("> Check the boxes you want, then run `trellis apply <this file>`. "
+             "Nothing here has been written to your notes.")
+    L.append("")
+    if tag_items:
+        L.append("## Tag suggestions\n")
+        for it in tag_items:
+            tags = " ".join(f"`{x}`" for x in it["tags"])
+            L.append(f"- [ ] [[{it['source']}]] → {tags}")
+        L.append("")
+    if moc_items:
+        L.append("## MOC placements\n")
+        for it in moc_items:
+            L.append(f"- [ ] [[{it['source']}]] → [[{it['moc']}]] "
+                     f"§ {it['section']} — {it['reason']}")
+        L.append("")
+    if idea_items:
+        L.append("## Product idea links\n")
+        for it in idea_items:
+            L.append(f"- [ ] [[{it['source']}]] → [[{it['idea']}]] — {it['reason']}")
+        L.append("")
+    if untouched:
+        L.append("## Notes with no suggestions\n")
+        for title, why in untouched:
+            L.append(f"- [[{title}]] — {why}")
+        L.append("")
+    if suspected:
+        L.append("## Suspected bulk-touch clusters (excluded — review manually)\n")
+        for key, rels in suspected:
+            L.append(f"- {key} · {len(rels)} file(s) (e.g. {rels[0]})")
+        L.append("")
+    if not (tag_items or moc_items or idea_items):
+        L.append("_No suggestions for this batch._")
     return "\n".join(L)
 
 

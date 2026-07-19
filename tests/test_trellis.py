@@ -1232,5 +1232,53 @@ class TestApplyReviewFileIntegration(unittest.TestCase):
         self.assertEqual(z_moc, "# Cycling MOC\n\n## Gear\n\n- [[Old note]]\n")
 
 
+class TestMocHeadings(unittest.TestCase):
+    def test_extracts_h2_h3_in_order(self):
+        body = "# Title\n\n## Alpha\ntext\n### Beta\n\n## Gamma\n#### too deep\n"
+        self.assertEqual(t.moc_headings(body), ["Alpha", "Beta", "Gamma"])
+
+    def test_empty(self):
+        self.assertEqual(t.moc_headings("no headings here"), [])
+
+
+class TestRenderTriageReport(unittest.TestCase):
+    def _md(self):
+        return t.render_triage_report(
+            "2026-07-19",
+            {"new_notes": 2, "new_tags": 2, "new_mocs": 1, "new_ideas": 1},
+            tag_items=[{"source": "Note A", "tags": ["endurance", "physiology"]}],
+            moc_items=[{"source": "Note A", "moc": "Cycling MOC",
+                        "section": "Training physiology", "reason": "mechanism note"}],
+            idea_items=[{"source": "Note A", "idea": "Training Load Dashboard",
+                         "reason": "evidence for metric"}],
+            untouched=[("Note B", "no MOC fit")],
+            suspected=[("2026-07-16 09:41", ["z/old1.md", "z/old2.md"])])
+
+    def test_sections_and_grammar_round_trip(self):
+        md = self._md()
+        self.assertIn("# Review — 2026-07-19", md)
+        self.assertIn("_Triage: 2 new note(s)", md)
+        # every suggestion line must round-trip through parse_review when checked
+        checked = md.replace("- [ ]", "- [x]")
+        r = t.parse_review(checked)
+        self.assertEqual(r["tags"], [("Note A", ["endurance", "physiology"])])
+        self.assertEqual(r["mocs"],
+                         [("Note A", "Cycling MOC", "Training physiology")])
+        self.assertEqual(r["ideas"],
+                         [("Note A", "Training Load Dashboard", "evidence for metric")])
+
+    def test_informational_sections_not_parsed(self):
+        checked = self._md().replace("- [ ]", "- [x]")
+        r = t.parse_review(checked)
+        flat = [s for s, *_ in r["mocs"]] + [s for s, *_ in r["ideas"]]
+        self.assertNotIn("Note B", flat)          # untouched list is inert
+
+    def test_prompts_have_slots(self):
+        p = t.MOC_PLACE_PROMPT.format(moc="M", sections="- A", title="T", excerpt="E")
+        self.assertIn('"section"', p)
+        p2 = t.IDEA_PROMPT.format(idea="I", idea_excerpt="X", title="T", excerpt="E")
+        self.assertIn('"related"', p2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
