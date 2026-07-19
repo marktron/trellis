@@ -908,5 +908,74 @@ class TestConfigPath(unittest.TestCase):
         self.assertEqual(cfg["db_path"], os.path.join(cwd_dir, "index.db"))
 
 
+class TestExtractCreated(unittest.TestCase):
+    def test_created_date(self):
+        import datetime
+        self.assertEqual(t.extract_created("created: 2026-07-15\ntags: [a]"),
+                         datetime.date(2026, 7, 15))
+
+    def test_published_fallback_and_quotes(self):
+        import datetime
+        self.assertEqual(t.extract_created("published: '2026-07-01'"),
+                         datetime.date(2026, 7, 1))
+
+    def test_datetime_value_keeps_date_part(self):
+        import datetime
+        self.assertEqual(t.extract_created("created: 2026-07-15T09:30:00"),
+                         datetime.date(2026, 7, 15))
+
+    def test_absent_or_invalid(self):
+        self.assertIsNone(t.extract_created(""))
+        self.assertIsNone(t.extract_created("title: created note"))
+        self.assertIsNone(t.extract_created("created: not-a-date"))
+
+
+class TestDetectNewNotes(unittest.TestCase):
+    CUT = __import__("datetime").datetime(2026, 7, 1, 12, 0, 0)
+
+    def _e(self, rel, created=None, mtime=0.0):
+        return (rel, created, mtime)
+
+    def test_created_after_cutoff_is_candidate(self):
+        import datetime
+        cands, bulk = t.detect_new_notes(
+            [self._e("z/new.md", datetime.date(2026, 7, 2))],
+            self.CUT, set(), 8)
+        self.assertEqual(cands, ["z/new.md"])
+        self.assertEqual(bulk, [])
+
+    def test_created_before_cutoff_ignored_even_with_fresh_mtime(self):
+        import datetime
+        fresh = self.CUT.timestamp() + 9999
+        cands, _ = t.detect_new_notes(
+            [self._e("z/old.md", datetime.date(2026, 6, 1), fresh)],
+            self.CUT, set(), 8)
+        self.assertEqual(cands, [])  # created: trumps mtime
+
+    def test_mtime_fallback_when_no_created(self):
+        fresh = self.CUT.timestamp() + 60
+        cands, _ = t.detect_new_notes(
+            [self._e("z/nofm.md", None, fresh),
+             self._e("z/stale.md", None, self.CUT.timestamp() - 60)],
+            self.CUT, set(), 8)
+        self.assertEqual(cands, ["z/nofm.md"])
+
+    def test_bulk_bucket_excluded_and_reported(self):
+        base = self.CUT.timestamp() + 3600
+        entries = [self._e(f"z/bulk{i}.md", None, base) for i in range(8)]
+        entries.append(self._e("z/lone.md", None, base + 300))
+        cands, bulk = t.detect_new_notes(entries, self.CUT, set(), 8)
+        self.assertEqual(cands, ["z/lone.md"])
+        self.assertEqual(len(bulk), 1)
+        self.assertEqual(len(bulk[0][1]), 8)
+
+    def test_already_triaged_excluded(self):
+        import datetime
+        cands, _ = t.detect_new_notes(
+            [self._e("z/done.md", datetime.date(2026, 7, 2))],
+            self.CUT, {"z/done.md"}, 8)
+        self.assertEqual(cands, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

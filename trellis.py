@@ -202,6 +202,54 @@ def extract_tags(frontmatter: str) -> list[str]:
     return [t for t in (t.strip() for t in tags) if t]
 
 
+_CREATED_RE = re.compile(r"(?mi)^(?:created|published)\s*:\s*['\"]?(\d{4}-\d{2}-\d{2})")
+
+
+def extract_created(frontmatter: str) -> "datetime.date | None":
+    """First created:/published: date in frontmatter, or None. Preferred over
+    mtime for triage — iCloud sync and bulk scripts bump mtimes of old notes."""
+    m = _CREATED_RE.search(frontmatter or "")
+    if not m:
+        return None
+    try:
+        return datetime.date.fromisoformat(m.group(1))
+    except ValueError:
+        return None
+
+
+def detect_new_notes(entries, cutoff, triaged, bulk_min):
+    """Pure new-note detection. entries: [(rel, created_date|None, mtime)].
+
+    A note with a created: date is judged by that date alone (mtime ignored).
+    Notes without one fall back to mtime, grouped into mtime-minute buckets:
+    a bucket of >= bulk_min files is a suspected sync/bulk touch — excluded
+    from candidates and returned separately for manual review.
+    Returns (sorted candidate rels, [(minute_str, sorted rels)])."""
+    cut_ts = cutoff.timestamp()
+    cut_date = cutoff.date()
+    candidates, mtime_only = [], []
+    for rel, created, mtime in entries:
+        if rel in triaged:
+            continue
+        if created is not None:
+            if created > cut_date:
+                candidates.append(rel)
+        elif mtime > cut_ts:
+            mtime_only.append((rel, mtime))
+    buckets = collections.defaultdict(list)
+    for rel, mtime in mtime_only:
+        key = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+        buckets[key].append(rel)
+    suspected = []
+    for key in sorted(buckets):
+        rels = buckets[key]
+        if len(rels) >= bulk_min:
+            suspected.append((key, sorted(rels)))
+        else:
+            candidates.extend(rels)
+    return sorted(candidates), suspected
+
+
 def content_hash(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
