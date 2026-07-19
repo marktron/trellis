@@ -259,7 +259,8 @@ class TestRenderReport(unittest.TestCase):
                          "suggestions": [{"title": "Note B", "reason": "shared theme"}]}],
             tag_items=[{"source": "Note A", "tags": ["ai"], "proposed_new": []}],
             orphans=["z/x.md"])
-        self.assertIn("# Gardener review — 2026-06-15", md)
+        self.assertIn("# Review — 2026-06-15", md)
+        self.assertIn("_Garden:", md)
         self.assertIn("- [ ] link → [[Note B]] — shared theme", md)
         self.assertIn("`ai`", md)
         self.assertIn("Orphans in scope", md)
@@ -269,6 +270,53 @@ class TestRenderReport(unittest.TestCase):
                              {"processed": 0, "new_links": 0, "new_tags": 0, "orphans": 0},
                              [], [], [])
         self.assertIn("No new suggestions", md)
+
+
+class TestReviewWriter(unittest.TestCase):
+    REPORT = ("# Review — 2026-07-19\n\n_Triage: 1 new note(s)._\n\n"
+              "> Check the boxes you want, then run `trellis apply <this file>`. "
+              "Nothing here has been written to your notes.\n\n"
+              "## Tag suggestions\n\n- [ ] [[A]] → `x`\n")
+
+    def test_strip_review_header(self):
+        body = t.strip_review_header(self.REPORT)
+        self.assertNotIn("# Review", body)
+        self.assertNotIn("> Check the boxes", body)
+        self.assertIn("_Triage: 1 new note(s)._", body)
+        self.assertIn("- [ ] [[A]] → `x`", body)
+
+    def test_create_when_absent(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        path = t.append_or_create_review(d, "2026-07-19", self.REPORT)
+        self.assertEqual(path, os.path.join(d, "2026-07-19.md"))
+        with open(path) as fh:
+            self.assertEqual(fh.read(), self.REPORT)
+
+    def test_append_when_pending(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        t.append_or_create_review(d, "2026-07-19", self.REPORT)
+        second = self.REPORT.replace("Triage", "Garden").replace("`x`", "`y`")
+        path = t.append_or_create_review(d, "2026-07-19", second)
+        content = open(path).read()
+        self.assertEqual(content.count("# Review — 2026-07-19"), 1)  # one H1
+        self.assertEqual(content.count("> Check the boxes"), 1)      # one hint
+        self.assertIn("\n---\n", content)
+        self.assertIn("_Garden: 1 new note(s)._", content)
+        self.assertIn("`y`", content)
+        # merged file still parses as one review
+        self.assertEqual(len(t.parse_review(content)["links"]), 0)
+
+    def test_archived_same_day_file_does_not_block_create(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "applied"))
+        with open(os.path.join(d, "applied", "2026-07-19.md"), "w") as fh:
+            fh.write("old")
+        path = t.append_or_create_review(d, "2026-07-19", self.REPORT)
+        self.assertEqual(path, os.path.join(d, "2026-07-19.md"))
+        self.assertEqual(open(path).read(), self.REPORT)
 
 
 class TestParseReview(unittest.TestCase):

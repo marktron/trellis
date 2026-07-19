@@ -989,9 +989,9 @@ def classify_tag_suggestions(picked_raw: list, proposed_raw: list,
 def render_report(date_str: str, summary: dict, link_items: list, tag_items: list,
                   orphans: list) -> str:
     """Render the gardener review queue as markdown. Pure (no I/O) for testing."""
-    L = [f"# Gardener review — {date_str}", ""]
+    L = [f"# Review — {date_str}", ""]
     L.append(
-        f"_Processed {summary['processed']} note(s) · "
+        f"_Garden: {summary['processed']} note(s) processed · "
         f"{summary['new_links']} new link suggestion(s) · "
         f"{summary['new_tags']} tag suggestion(s) · "
         f"{summary['orphans']} orphan(s) in scope._")
@@ -1238,9 +1238,8 @@ def cmd_garden(cfg, args):
         print("\n--- DRY RUN (report not written) ---\n")
         print(report)
         return 0
-    out_path = _dated_report_path(os.path.join(vault, cfg["gardener_dir"]), date_str)
-    with open(out_path, "w", encoding="utf-8") as fh:
-        fh.write(report)
+    out_path = append_or_create_review(
+        os.path.join(vault, cfg["gardener_dir"]), date_str, report)
     print(f"\nreview queue → {out_path}")
     print(f"  {new_links} new link · {new_tags} tag suggestion(s) "
           f"across {len(eligible)} note(s)")
@@ -1537,6 +1536,31 @@ def merge_frontmatter_tags(content: str, new_tags: list[str]) -> str | None:
     if has_trailing_newline:
         new_content += "\n"
     return new_content
+
+
+def strip_review_header(md: str) -> str:
+    """Drop the H1 title and the checkbox-hint blockquote — the parts already
+    present when appending a report to an existing pending review file."""
+    keep = [ln for ln in md.splitlines()
+            if not ln.startswith("# ") and not ln.startswith("> Check the boxes")]
+    out = "\n".join(keep).strip()
+    return out + "\n" if out else ""
+
+
+def append_or_create_review(out_dir: str, date_str: str, report: str) -> str:
+    """Write a report into the shared review queue. Today's dated file still
+    sitting in out_dir means it is pending (applied files are archived away),
+    so this report's body is appended under a rule instead of creating a
+    suffixed sibling."""
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{date_str}.md")
+    if os.path.exists(path):
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"\n---\n\n{strip_review_header(report)}")
+    else:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(report)
+    return path
 
 
 def _dated_report_path(out_dir: str, date_str: str) -> str:
