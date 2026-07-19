@@ -94,6 +94,13 @@ DEFAULTS = {
     "moc_link_cover_threshold": 0.70,  # ≥this fraction already MOC-linked ⇒ covered
     "cluster_repr_notes": 8,         # representative notes shown per candidate
     "random_state": 42,              # seed UMAP for run-to-run stability
+    # --- triage (phase 4) ---
+    "triage_scope": ["z/"],            # path prefixes triage watches for new notes
+    "idea_scope": ["Areas/Product Ideas/"],  # where product-idea files live
+    "triage_bulk_min": 8,              # mtime-minute bucket >= this ⇒ suspected bulk touch
+    "triage_tag_skip_threshold": 3,    # skip tag step when a note already has >= this many
+    "moc_place_threshold": 0.55,       # note↔MOC cosine gate (provisional; tune)
+    "idea_link_threshold": 0.55,       # note↔idea cosine gate (provisional; tune)
 }
 
 # qwen3-embedding works best with a task instruction on the QUERY side only.
@@ -1160,6 +1167,8 @@ def _scan_vault(vault, exclude, max_chars):
             # Hash the note WITHOUT trellis's own appended blocks, so applying
             # links doesn't re-trigger gardening on an otherwise-unchanged note.
             "hash": content_hash(strip_trellis_blocks(text).encode("utf-8")),
+            "created": extract_created(fm),
+            "mtime": os.path.getmtime(full),
         }
     return notes
 
@@ -1949,6 +1958,233 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int, int, int]:
 # Migrate: legacy "Added by Claude on <date>:" link blocks -> one section
 # --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
+# Triage (phase 4): new-note tags / MOC placement / idea links -> review queue
+# --------------------------------------------------------------------------- #
+def cmd_triage(cfg, args):
+    if not _require_vault(cfg):
+        return 1
+    vault = cfg["vault"]
+    scope = tuple(args.scope.split(",")) if args.scope else tuple(cfg["triage_scope"])
+    gen_model = cfg["gen_model"]
+
+    conn = connect(cfg["db_path"])
+    _ensure_garden_tables(conn)
+    _ensure_triage_tables(conn)
+
+    # One-time seed from the note-triage skill's state file, if present.
+    state_json = os.path.join(vault, "_workspace", "triage-state.json")
+    if os.path.exists(state_json):
+        try:
+            with open(state_json, encoding="utf-8") as fh:
+                imported = seed_triage_state(conn, json.load(fh))
+            if imported:
+                print(f"seeded triage state from triage-state.json ({imported} notes)")
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            print(f"warning: could not read {state_json}: {e}", file=sys.stderr)
+
+    last_run = meta_get(conn, "triage_last_run")
+    if last_run is None:
+        # First run, nothing to seed from: baseline only. Everything currently
+        # in scope is treated as pre-existing; later notes get triaged.
+        meta_set(conn, "triage_last_run", datetime.datetime.now().isoformat())
+        conn.commit()
+        print("no triage state found — baseline initialized; "
+              "notes created from now on will be triaged")
+        return 0
+    cutoff = datetime.datetime.fromisoformat(last_run)
+
+    paths, titles, mat = _load_matrix(conn)
+    if not paths:
+        print("index is empty — run:  trellis index", file=sys.stderr)
+        return 1
+    rel_to_idx = {p: i for i, p in enumerate(paths)}
+
+    print("scanning vault…", flush=True)
+    notes = _scan_vault(vault, set(cfg["exclude_dirs"]), cfg["max_chars"])
+    vault_tags = {tag.lower() for n in notes.values() for tag in n["tags"]}
+    triaged = (set() if args.force else
+               {row[0] for row in conn.execute("SELECT path FROM triage_state")})
+
+    entries = [(rel, n["created"], n["mtime"])
+               for rel, n in notes.items() if rel.startswith(scope)]
+    candidates, suspected = detect_new_notes(entries, cutoff, triaged,
+                                             cfg["triage_bulk_min"])
+    candidates = [r for r in candidates if r in rel_to_idx]
+    limited = bool(args.limit) and len(candidates) > args.limit
+    if limited:
+        print(f"limiting to {args.limit} of {len(candidates)} candidates "
+              "(rest queued for the next run)")
+        candidates = candidates[:args.limit]
+
+    for key, rels in suspected:
+        print(f"suspected bulk touch at {key}: {len(rels)} file(s) excluded",
+              file=sys.stderr)
+    if not candidates:
+        print(f"no new notes since {cutoff.date().isoformat()}")
+        return 0
+    print(f"scope {scope} · {len(candidates)} new note(s) since "
+          f"{cutoff.date().isoformat()}\n", flush=True)
+
+    moc_scope = tuple(cfg["moc_scope"])
+    idea_scope = tuple(cfg["idea_scope"])
+    moc_rows = [(i, titles[i]) for i, p in enumerate(paths) if p.startswith(moc_scope)]
+    idea_rows = [(i, titles[i]) for i, p in enumerate(paths) if p.startswith(idea_scope)]
+    if not moc_rows:
+        print(f"note: no indexed notes under {moc_scope} — skipping MOC placement",
+              file=sys.stderr)
+    if not idea_rows:
+        print(f"note: no indexed notes under {idea_scope} — skipping idea links",
+              file=sys.stderr)
+
+    seen = {(row[0], row[1], row[2]) for row in
+            conn.execute("SELECT path, kind, value FROM suggestions").fetchall()}
+    now = time.time()
+    tag_items, moc_items, idea_items, untouched = [], [], [], []
+    n_tags = n_mocs = n_ideas = 0
+
+    for n, rel in enumerate(candidates, 1):
+        note = notes[rel]
+        idx = rel_to_idx[rel]
+        got, why = 0, []
+
+        # ---- tags (garden pipeline, no thin-note gate) ----
+        if len(note["tags"]) >= cfg["triage_tag_skip_threshold"]:
+            why.append("already tagged")
+        else:
+            neigh = [(titles[i], paths[i]) for i, _ in
+                     top_k(mat[idx], mat, cfg["tag_candidate_neighbors"] + 1)
+                     if i != idx]
+            ntags = [notes.get(pp, {}).get("tags", []) for _, pp in neigh]
+            cand_tags = candidate_tags(ntags, set(note["tags"]), 20)
+            picked = []
+            if cand_tags:
+                prompt = TAG_PROMPT.format(title=note["title"],
+                                           excerpt=note["excerpt"][:1200],
+                                           tags=", ".join(cand_tags))
+                try:
+                    out = generate_json(prompt, gen_model, cfg["ollama_url"],
+                                        timeout=cfg["gen_timeout"],
+                                        num_predict=cfg["gen_num_predict"])
+                except OllamaError:
+                    out = {}
+                picked, _ = classify_tag_suggestions(
+                    out.get("tags", []), [], cand_tags, vault_tags, note["tags"])
+            fresh = [x for x in picked if (rel, "tag", x) not in seen]
+            if fresh:
+                for x in fresh:
+                    seen.add((rel, "tag", x))
+                    if not args.dry_run:
+                        conn.execute("INSERT OR IGNORE INTO suggestions VALUES(?,?,?,?,?,?)",
+                                     (rel, "tag", x, "", now, "new"))
+                tag_items.append({"source": note["title"], "tags": fresh})
+                n_tags += len(fresh)
+                got += len(fresh)
+            else:
+                why.append("no tag fit")
+
+        # ---- MOC placement ----
+        placed = False
+        if moc_rows:
+            sim, mi, mtitle = max(
+                (float(mat[idx] @ mat[i]), i, ttl) for i, ttl in moc_rows)
+            if sim >= cfg["moc_place_threshold"] and (rel, "moc", mtitle) not in seen:
+                moc_raw = read_note(os.path.join(vault, paths[mi]))
+                headings = []
+                if moc_raw:
+                    _, moc_body = split_frontmatter(moc_raw.decode("utf-8", "replace"))
+                    headings = moc_headings(moc_body)
+                if headings:
+                    prompt = MOC_PLACE_PROMPT.format(
+                        moc=mtitle,
+                        sections="\n".join(f"- {h}" for h in headings),
+                        title=note["title"], excerpt=note["excerpt"][:1200])
+                    try:
+                        out = generate_json(prompt, gen_model, cfg["ollama_url"],
+                                            timeout=cfg["gen_timeout"],
+                                            num_predict=cfg["gen_num_predict"])
+                    except OllamaError:
+                        out = {}
+                    section = out.get("section")
+                    by_lower = {h.lower(): h for h in headings}
+                    if isinstance(section, str) and section.strip().lower() in by_lower:
+                        section = by_lower[section.strip().lower()]
+                        reason = " ".join(str(out.get("reason", "")).split()[:10])[:120]
+                        seen.add((rel, "moc", mtitle))
+                        if not args.dry_run:
+                            conn.execute("INSERT OR IGNORE INTO suggestions VALUES(?,?,?,?,?,?)",
+                                         (rel, "moc", mtitle,
+                                          f"{section} — {reason}", now, "new"))
+                        moc_items.append({"source": note["title"], "moc": mtitle,
+                                          "section": section, "reason": reason})
+                        n_mocs += 1
+                        got += 1
+                        placed = True
+        if moc_rows and not placed:
+            why.append("no MOC fit")
+
+        # ---- Product idea links (top 3 ideas above the gate) ----
+        linked = False
+        if idea_rows:
+            ranked = sorted(((float(mat[idx] @ mat[i]), i, ttl)
+                             for i, ttl in idea_rows), reverse=True)
+            for sim, ii, ititle in ranked[:3]:
+                if sim < cfg["idea_link_threshold"] or (rel, "idea", ititle) in seen:
+                    continue
+                prompt = IDEA_PROMPT.format(
+                    idea=ititle,
+                    idea_excerpt=notes.get(paths[ii], {}).get("excerpt", "")[:600],
+                    title=note["title"], excerpt=note["excerpt"][:1200])
+                try:
+                    out = generate_json(prompt, gen_model, cfg["ollama_url"],
+                                        timeout=cfg["gen_timeout"],
+                                        num_predict=cfg["gen_num_predict"])
+                except OllamaError:
+                    out = {}
+                if out.get("related") is True:
+                    reason = " ".join(str(out.get("reason", "")).split()[:10])[:120]
+                    seen.add((rel, "idea", ititle))
+                    if not args.dry_run:
+                        conn.execute("INSERT OR IGNORE INTO suggestions VALUES(?,?,?,?,?,?)",
+                                     (rel, "idea", ititle, reason, now, "new"))
+                    idea_items.append({"source": note["title"], "idea": ititle,
+                                       "reason": reason})
+                    n_ideas += 1
+                    got += 1
+                    linked = True
+        if idea_rows and not linked:
+            why.append("no idea fit")
+
+        if not got:
+            untouched.append((note["title"], "; ".join(why) or "nothing to add"))
+        if not args.dry_run:
+            conn.execute("INSERT OR IGNORE INTO triage_state VALUES(?,?)", (rel, now))
+            conn.commit()
+        print(f"  [{n}/{len(candidates)}] {note['title'][:50]}  (+{got})", flush=True)
+
+    date_str = datetime.date.today().isoformat()
+    summary = {"new_notes": len(candidates), "new_tags": n_tags,
+               "new_mocs": n_mocs, "new_ideas": n_ideas}
+    report = render_triage_report(date_str, summary, tag_items, moc_items,
+                                  idea_items, untouched, suspected)
+
+    if args.dry_run:
+        print("\n--- DRY RUN (report not written) ---\n")
+        print(report)
+        return 0
+    out_path = append_or_create_review(
+        os.path.join(vault, cfg["gardener_dir"]), date_str, report)
+    if not limited:
+        # Advance the cutoff only when nothing was left behind — a --limit run
+        # relies on triage_state alone so the remainder surfaces next time.
+        meta_set(conn, "triage_last_run", datetime.datetime.now().isoformat())
+    conn.commit()
+    print(f"\nreview queue → {out_path}")
+    print(f"  {n_tags} tag · {n_mocs} MOC placement · {n_ideas} idea link "
+          f"suggestion(s) across {len(candidates)} new note(s)")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def main(argv=None):
@@ -2001,6 +2237,17 @@ def main(argv=None):
     pcl.add_argument("--dry-run", action="store_true",
                      help="print report; write nothing (no ledger, no file)")
 
+    pt = sub.add_parser("triage",
+                        help="triage new notes -> tag/MOC/idea suggestions")
+    pt.add_argument("--limit", type=int,
+                    help="max new notes this run (rest queued for next run)")
+    pt.add_argument("--scope", help="comma-separated path prefixes (default: z/)")
+    pt.add_argument("--gen-model", dest="gen_model", help="judgment model")
+    pt.add_argument("--force", action="store_true",
+                    help="ignore triage state; re-triage matching notes")
+    pt.add_argument("--dry-run", action="store_true",
+                    help="print the report; write nothing (no ledger, no state, no file)")
+
     args = p.parse_args(argv)
     cfg = load_config({"vault": args.vault, "embed_model": args.embed_model,
                        "db_path": args.db_path,
@@ -2008,7 +2255,7 @@ def main(argv=None):
     return {
         "index": cmd_index, "search": cmd_search,
         "neighbors": cmd_neighbors, "status": cmd_status, "garden": cmd_garden,
-        "apply": cmd_apply, "cluster": cmd_cluster,
+        "apply": cmd_apply, "cluster": cmd_cluster, "triage": cmd_triage,
     }[args.cmd](cfg, args)
 
 
