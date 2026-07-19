@@ -1116,6 +1116,20 @@ class TestInsertIntoSection(unittest.TestCase):
         out = t.insert_into_section(self.MOC, "Gear", "- [[New saddle]]")
         self.assertTrue(out.rstrip().endswith("- [[New saddle]]"))
 
+    def test_prefix_title_is_not_a_false_duplicate(self):
+        # [[Some bike]] present must NOT block inserting [[Some bike computer]]
+        out = t.insert_into_section(self.MOC, "Gear", "- [[Some bike computer]]")
+        self.assertIsNotNone(out)
+        self.assertIn("[[Some bike computer]]", out)
+
+    def test_superstring_title_is_not_a_false_duplicate(self):
+        out = t.insert_into_section(self.MOC, "Gear", "- [[Some]]")
+        self.assertIn("[[Some]]", out)
+
+    def test_alias_form_still_counts_as_duplicate(self):
+        moc = self.MOC.replace("- [[Some bike]]", "- [[Some bike|my ride]]")
+        self.assertEqual(t.insert_into_section(moc, "Gear", "- [[Some bike]]"), moc)
+
 
 class TestAppendRelatedNote(unittest.TestCase):
     def test_creates_section_at_eof(self):
@@ -1135,6 +1149,87 @@ class TestAppendRelatedNote(unittest.TestCase):
         self.assertEqual(
             t.append_related_note(content, "Note A", "new why", "2026-07-19"),
             content)
+
+    def test_prefix_title_not_deduped_in_related(self):
+        content = "# Idea\n\n## Related notes\n\n- [[Note Alpha and more]] — x\n"
+        out = t.append_related_note(content, "Note Alpha", "why", "2026-07-19")
+        self.assertIn("- [[Note Alpha]] — why", out)
+
+
+class TestApplyReviewFileIntegration(unittest.TestCase):
+    def _mk_vault(self):
+        import tempfile
+        vault = tempfile.mkdtemp()
+        os.makedirs(os.path.join(vault, "MOCs"))
+        os.makedirs(os.path.join(vault, "Areas", "Product Ideas"))
+        os.makedirs(os.path.join(vault, "z"))
+        os.makedirs(os.path.join(vault, "_workspace", "gardener"))
+        with open(os.path.join(vault, "MOCs", "Cycling MOC.md"), "w") as fh:
+            fh.write("# Cycling MOC\n\n## Gear\n\n- [[Old note]]\n")
+        with open(os.path.join(vault, "Areas", "Product Ideas", "Dash.md"), "w") as fh:
+            fh.write("# Dash\n\nBody.\n")
+        with open(os.path.join(vault, "z", "New note.md"), "w") as fh:
+            fh.write("---\ntags: [x]\n---\ncontent\n")
+        review = os.path.join(vault, "_workspace", "gardener", "2026-07-19.md")
+        with open(review, "w") as fh:
+            fh.write("# Review — 2026-07-19\n\n## MOC placements\n\n"
+                     "- [x] [[New note]] → [[Cycling MOC]] § Gear — fits\n\n"
+                     "## Product idea links\n\n"
+                     "- [x] [[New note]] → [[Dash]] — evidence\n")
+        cfg = {"vault": vault, "gardener_dir": "_workspace/gardener",
+               "exclude_dirs": ["_workspace"], "max_chars": 6000,
+               "db_path": os.path.join(vault, "test.db"),
+               "moc_scope": ["MOCs/"], "idea_scope": ["Areas/Product Ideas/"]}
+        return vault, review, cfg
+
+    def test_apply_writes_moc_and_idea_and_archives(self):
+        vault, review, cfg = self._mk_vault()
+        links, tags, mocs, ideas, _ = t._apply_review_file(cfg, review, dry_run=False)
+        self.assertEqual((links, tags, mocs, ideas), (0, 0, 1, 1))
+        moc = open(os.path.join(vault, "MOCs", "Cycling MOC.md")).read()
+        self.assertIn("- [[New note]]", moc)
+        self.assertLess(moc.index("[[Old note]]"), moc.index("[[New note]]"))
+        idea = open(os.path.join(vault, "Areas", "Product Ideas", "Dash.md")).read()
+        self.assertIn("- [[New note]] — evidence", idea)
+        # z/ note body untouched
+        z = open(os.path.join(vault, "z", "New note.md")).read()
+        self.assertEqual(z, "---\ntags: [x]\n---\ncontent\n")
+        # review archived
+        self.assertFalse(os.path.exists(review))
+
+    def test_dry_run_writes_nothing(self):
+        vault, review, cfg = self._mk_vault()
+        before = open(os.path.join(vault, "MOCs", "Cycling MOC.md")).read()
+        t._apply_review_file(cfg, review, dry_run=True)
+        self.assertEqual(open(os.path.join(vault, "MOCs", "Cycling MOC.md")).read(), before)
+        self.assertTrue(os.path.exists(review))
+
+    def test_moc_target_outside_scope_is_skipped(self):
+        # A z/ note happens to share its title with the MOC placement target.
+        # Without a scope guard, _edit_target would resolve to it (the only
+        # note with that title, since no MOCs/Cycling MOC.md exists here) and
+        # write into a z/ note body — which this apply path must never do.
+        import tempfile
+        vault = tempfile.mkdtemp()
+        os.makedirs(os.path.join(vault, "MOCs"))
+        os.makedirs(os.path.join(vault, "z"))
+        os.makedirs(os.path.join(vault, "_workspace", "gardener"))
+        with open(os.path.join(vault, "z", "Cycling MOC.md"), "w") as fh:
+            fh.write("# Cycling MOC\n\n## Gear\n\n- [[Old note]]\n")
+        with open(os.path.join(vault, "z", "New note.md"), "w") as fh:
+            fh.write("---\ntags: [x]\n---\ncontent\n")
+        review = os.path.join(vault, "_workspace", "gardener", "2026-07-19.md")
+        with open(review, "w") as fh:
+            fh.write("# Review — 2026-07-19\n\n## MOC placements\n\n"
+                     "- [x] [[New note]] → [[Cycling MOC]] § Gear — fits\n")
+        cfg = {"vault": vault, "gardener_dir": "_workspace/gardener",
+               "exclude_dirs": ["_workspace"], "max_chars": 6000,
+               "db_path": os.path.join(vault, "test.db"),
+               "moc_scope": ["MOCs/"], "idea_scope": ["Areas/Product Ideas/"]}
+        links, tags, mocs, ideas, _ = t._apply_review_file(cfg, review, dry_run=False)
+        self.assertEqual(mocs, 0)
+        z_moc = open(os.path.join(vault, "z", "Cycling MOC.md")).read()
+        self.assertEqual(z_moc, "# Cycling MOC\n\n## Gear\n\n- [[Old note]]\n")
 
 
 if __name__ == "__main__":

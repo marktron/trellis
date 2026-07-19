@@ -1583,8 +1583,11 @@ def insert_into_section(content: str, section: str, line: str) -> str | None:
             break
     probe = re.search(r"\[\[([^\]|#]+)", line)
     if probe:
-        needle = f"[[{probe.group(1).strip().lower()}"
-        if any(needle in ln.lower() for ln in lines[start:end]):
+        want = probe.group(1).strip().lower()
+        seg = "\n".join(lines[start:end])
+        existing = {m.split("|")[0].split("#")[0].strip().lower()
+                    for m in _LINK_RE.findall(seg)}
+        if want in existing:
             return content
     last = start
     for j in range(start + 1, end):
@@ -1784,6 +1787,12 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int, int, int]:
         rel = title_to_rel.get(title.lower())
         if not rel:
             print(f"  ! {kind} target not found, skipping: {title}", file=sys.stderr)
+            return 0
+        scopes = tuple(cfg.get("moc_scope", ["MOCs/"])) if kind == "MOC" \
+            else tuple(cfg.get("idea_scope", ["Areas/Product Ideas/"]))
+        if scopes and not rel.startswith(scopes):
+            print(f"  ! {kind} target [[{title}]] resolves outside {scopes} "
+                  f"({rel}); skipping", file=sys.stderr)
             return 0
         full = os.path.join(cfg["vault"], rel)
         content = open(full, encoding="utf-8").read()
