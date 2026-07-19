@@ -976,6 +976,15 @@ class TestDetectNewNotes(unittest.TestCase):
             self.CUT, {"z/done.md"}, 8)
         self.assertEqual(cands, [])
 
+    def test_created_on_cutoff_day_is_candidate(self):
+        # A note created later on the day of the last run must not be lost;
+        # the triaged set (not the date gate) prevents reprocessing.
+        import datetime
+        cands, _ = t.detect_new_notes(
+            [self._e("z/sameday.md", datetime.date(2026, 7, 1))],
+            self.CUT, set(), 8)
+        self.assertEqual(cands, ["z/sameday.md"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

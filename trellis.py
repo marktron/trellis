@@ -232,7 +232,7 @@ def detect_new_notes(entries, cutoff, triaged, bulk_min):
         if rel in triaged:
             continue
         if created is not None:
-            if created > cut_date:
+            if created >= cut_date:  # inclusive: same-day notes stay visible; triaged-set dedupes
                 candidates.append(rel)
         elif mtime > cut_ts:
             mtime_only.append((rel, mtime))
