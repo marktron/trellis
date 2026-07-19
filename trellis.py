@@ -1973,17 +1973,29 @@ def cmd_triage(cfg, args):
 
     # One-time seed from the note-triage skill's state file, if present.
     state_json = os.path.join(vault, "_workspace", "triage-state.json")
+    skill_state = None
     if os.path.exists(state_json):
         try:
             with open(state_json, encoding="utf-8") as fh:
-                imported = seed_triage_state(conn, json.load(fh))
-            if imported:
-                print(f"seeded triage state from triage-state.json ({imported} notes)")
+                skill_state = json.load(fh)
         except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
             print(f"warning: could not read {state_json}: {e}", file=sys.stderr)
+    if skill_state is not None and not args.dry_run:
+        imported = seed_triage_state(conn, skill_state)
+        if imported:
+            print(f"seeded triage state from triage-state.json ({imported} notes)")
 
     last_run = meta_get(conn, "triage_last_run")
+    dry_seed_triaged: set = set()
+    if last_run is None and args.dry_run and skill_state is not None:
+        # Dry run must not persist the seed; derive the same view in memory.
+        last_run = skill_state.get("last_run_iso")
+        dry_seed_triaged = {"z/" + n for n in (skill_state.get("triaged") or [])}
     if last_run is None:
+        if args.dry_run:
+            print("no triage state found — a real run would initialize the "
+                  "baseline (nothing written in dry run)")
+            return 0
         # First run, nothing to seed from: baseline only. Everything currently
         # in scope is treated as pre-existing; later notes get triaged.
         meta_set(conn, "triage_last_run", datetime.datetime.now().isoformat())
@@ -2004,6 +2016,8 @@ def cmd_triage(cfg, args):
     vault_tags = {tag.lower() for n in notes.values() for tag in n["tags"]}
     triaged = (set() if args.force else
                {row[0] for row in conn.execute("SELECT path FROM triage_state")})
+    if not args.force:
+        triaged |= dry_seed_triaged
 
     entries = [(rel, n["created"], n["mtime"])
                for rel, n in notes.items() if rel.startswith(scope)]
