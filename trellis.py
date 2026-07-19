@@ -2171,8 +2171,9 @@ def cmd_triage(cfg, args):
         if not got:
             untouched.append((note["title"], "; ".join(why) or "nothing to add"))
         if not args.dry_run:
+            # Not committed here: state must never land without the review
+            # file. See the single end-of-run commit below.
             conn.execute("INSERT OR IGNORE INTO triage_state VALUES(?,?)", (rel, now))
-            conn.commit()
         print(f"  [{n}/{len(candidates)}] {note['title'][:50]}  (+{got})", flush=True)
 
     date_str = datetime.date.today().isoformat()
@@ -2191,6 +2192,8 @@ def cmd_triage(cfg, args):
         # Advance the cutoff only when nothing was left behind — a --limit run
         # relies on triage_state alone so the remainder surfaces next time.
         meta_set(conn, "triage_last_run", datetime.datetime.now().isoformat())
+    # Single end-of-run commit: state must never land without the review
+    # file (interrupted runs roll back wholesale).
     conn.commit()
     print(f"\nreview queue → {out_path}")
     print(f"  {n_tags} tag · {n_mocs} MOC placement · {n_ideas} idea link "
