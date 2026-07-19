@@ -72,3 +72,14 @@ cover_sim_threshold      = 0.60   # centroid >= this to an MOC embedding => cove
 moc_link_cover_threshold = 0.70   # >= this fraction already MOC-linked => covered
 cluster_repr_notes       = 8
 random_state             = 42
+
+# --- new-note triage (phase 4) ---
+# Triage watches these prefixes for notes newly created since the last run
+# (created:/published: frontmatter preferred; mtime fallback with a bulk-touch
+# guard). Suggestions go into the shared gardener review file.
+triage_scope        = ["z/"]
+idea_scope          = ["Areas/Product Ideas/"]  # product-idea files (must be indexed)
+triage_bulk_min     = 8      # >= this many notes sharing an mtime-minute => bulk touch, excluded
+triage_tag_skip_threshold = 3  # skip tag suggestions when a note already has this many
+moc_place_threshold = 0.55   # note<->MOC cosine gate (provisional; tune after first run)
+idea_link_threshold = 0.55   # note<->idea cosine gate (provisional; tune after first run)

@@ -18,9 +18,14 @@ files of suggestions, and only what you check off gets applied.
   for precision), tag suggestions for thin notes (controlled vocabulary), and
   orphan detection. Emits a dated, checkbox review queue to
   `_workspace/gardener/` — never edits notes directly.
+- **New-note triage** — detects notes newly added to `z/` (trusting `created:`
+  frontmatter over sync-scrambled mtimes), then suggests frontmatter tags, a
+  placement in the best-fitting MOC section, and links into relevant
+  `Areas/Product Ideas/` files. Suggestions land in the same dated review file
+  as the gardener's; `trellis apply` writes the checked ones.
 - **Apply step** — read back the checked boxes in a review file and apply
-  approved tags/links to notes (links append to the body; tags fold into
-  YAML frontmatter).
+  approved tags/links/MOC placements/idea links to notes (links append to the body;
+  tags fold into YAML frontmatter; MOC placements suggest a section to add a note to).
 - **Auto-MOC detection** — cluster `z/` (UMAP → HDBSCAN), test each cluster
   against existing MOCs (centroid vs. MOC embeddings, plus how much is already
   MOC-linked), name the uncovered ones with the local gen model, and emit a
@@ -194,9 +199,21 @@ most-disconnected-first, so orphans get attention before well-linked notes.
 **Nothing is ever written to your notes** — the `apply` step (below) reads back
 the checked boxes.
 
+### Triage new notes
+
+```sh
+trellis triage             # suggest tags / MOC placement / idea links for new notes
+trellis triage --dry-run   # print the report without writing anything
+trellis apply              # apply all checked items from pending reviews
+```
+
+The first run initializes a baseline (or imports `_workspace/triage-state.json`
+if the earlier Claude-skill workflow left one); after a backlog import, run
+with `--limit` a few times rather than triaging weeks of notes at once.
+
 ### Nightly scheduler (launchd)
 
-`run-garden.sh` refreshes the index then gardens (it locates itself, so no
+`run-garden.sh` refreshes the index, triages new notes, then gardens (it locates itself, so no
 paths to edit); `com.trellis.garden.plist.example` runs it nightly at 03:00.
 Copy the example, replace `/path/to/trellis` with your checkout's absolute path
 (launchd doesn't expand `~`), then load it:
