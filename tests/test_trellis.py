@@ -1090,5 +1090,52 @@ class TestTriageState(unittest.TestCase):
         self.assertEqual(t.seed_triage_state(conn, {}), 0)
 
 
+class TestInsertIntoSection(unittest.TestCase):
+    MOC = ("---\ntags: [moc]\n---\n# Cycling MOC\n\n## Training physiology\n\n"
+           "- [[Existing note]]\n\n## Gear\n\n- [[Some bike]]\n")
+
+    def test_inserts_at_end_of_section(self):
+        out = t.insert_into_section(self.MOC, "Training physiology", "- [[New note]]")
+        self.assertIsNotNone(out)
+        idx_new = out.index("[[New note]]")
+        self.assertGreater(idx_new, out.index("[[Existing note]]"))
+        self.assertLess(idx_new, out.index("## Gear"))
+
+    def test_heading_match_case_insensitive(self):
+        self.assertIsNotNone(
+            t.insert_into_section(self.MOC, "training PHYSIOLOGY", "- [[N]]"))
+
+    def test_missing_heading_returns_none(self):
+        self.assertIsNone(t.insert_into_section(self.MOC, "Nutrition", "- [[N]]"))
+
+    def test_idempotent(self):
+        once = t.insert_into_section(self.MOC, "Gear", "- [[Some bike]]")
+        self.assertEqual(once, self.MOC)  # already present in that section
+
+    def test_last_section_of_file(self):
+        out = t.insert_into_section(self.MOC, "Gear", "- [[New saddle]]")
+        self.assertTrue(out.rstrip().endswith("- [[New saddle]]"))
+
+
+class TestAppendRelatedNote(unittest.TestCase):
+    def test_creates_section_at_eof(self):
+        out = t.append_related_note("# Idea\n\nBody.\n", "Note A", "why", "2026-07-19")
+        self.assertIn("## Related notes (added 2026-07-19)", out)
+        self.assertIn("- [[Note A]] — why", out)
+
+    def test_reuses_legacy_claude_section(self):
+        content = ("# Idea\n\n## Related notes (added by Claude on 2026-05-01)\n\n"
+                   "- [[Old note]] — old why\n")
+        out = t.append_related_note(content, "Note A", "why", "2026-07-19")
+        self.assertEqual(out.count("## Related notes"), 1)
+        self.assertIn("- [[Note A]] — why", out)
+
+    def test_idempotent_per_note(self):
+        content = "# Idea\n\n## Related notes\n\n- [[Note A]] — earlier why\n"
+        self.assertEqual(
+            t.append_related_note(content, "Note A", "new why", "2026-07-19"),
+            content)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

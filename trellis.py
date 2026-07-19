@@ -1557,6 +1557,58 @@ def merge_frontmatter_tags(content: str, new_tags: list[str]) -> str | None:
     return new_content
 
 
+_SECTION_HDR_RE = re.compile(r"^(#{2,3})\s+(.+?)\s*$")
+_RELATED_HDR_RE = re.compile(r"(?m)^##\s+(Related notes\b[^\n]*)$")
+
+
+def insert_into_section(content: str, section: str, line: str) -> str | None:
+    """Insert `line` as the last item of the named ##/### section. Returns None
+    if no such heading exists (never guess a section); returns content
+    unchanged if the line's [[target]] already appears in the section."""
+    lines = content.splitlines()
+    start = level = None
+    want = section.strip().lower()
+    for i, ln in enumerate(lines):
+        m = _SECTION_HDR_RE.match(ln)
+        if m and m.group(2).strip().lower() == want:
+            start, level = i, len(m.group(1))
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        m = re.match(r"^(#{1,6})\s+", lines[j])
+        if m and len(m.group(1)) <= level:
+            end = j
+            break
+    probe = re.search(r"\[\[([^\]|#]+)", line)
+    if probe:
+        needle = f"[[{probe.group(1).strip().lower()}"
+        if any(needle in ln.lower() for ln in lines[start:end]):
+            return content
+    last = start
+    for j in range(start + 1, end):
+        if lines[j].strip():
+            last = j
+    lines.insert(last + 1, line)
+    return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
+
+
+def append_related_note(content: str, note_title: str, reason: str,
+                        date_str: str) -> str:
+    """Append '- [[note]] — reason' under the first '## Related notes…' heading
+    (prefix match — legacy 'added by Claude' sections are reused, not
+    duplicated), creating the section at EOF if absent. Idempotent per note."""
+    line = f"- [[{note_title}]] — {reason}" if reason else f"- [[{note_title}]]"
+    m = _RELATED_HDR_RE.search(content)
+    if not m:
+        base = content.rstrip()
+        prefix = base + "\n\n" if base else ""
+        return f"{prefix}## Related notes (added {date_str})\n\n{line}\n"
+    updated = insert_into_section(content, m.group(1), line)
+    return updated if updated is not None else content
+
+
 def strip_review_header(md: str) -> str:
     """Drop the H1 title and the checkbox-hint blockquote — the parts already
     present when appending a report to an existing pending review file."""
@@ -1627,33 +1679,33 @@ def cmd_apply(cfg, args):
         print(f"applying {len(paths)} pending review(s) from the gardener folder")
 
     multi = len(paths) > 1
-    tot_links = tot_tags = tot_sources = 0
+    tot = [0, 0, 0, 0, 0]
     for path in paths:
         if multi:
             print(f"\n── {os.path.basename(path)} ──")
-        l, t, s = _apply_review_file(cfg, path, args.dry_run)
-        tot_links += l
-        tot_tags += t
-        tot_sources += s
+        for i, v in enumerate(_apply_review_file(cfg, path, args.dry_run)):
+            tot[i] += v
 
     if multi:
         head = "DRY RUN — would apply" if args.dry_run else "applied"
-        print(f"\nTOTAL {head}: {tot_links} link(s) · {tot_tags} tag(s) "
-              f"across {tot_sources} source note(s) in {len(paths)} review(s)")
+        print(f"\nTOTAL {head}: {tot[0]} link(s) · {tot[1]} tag(s) · "
+              f"{tot[2]} MOC placement(s) · {tot[3]} idea link(s) "
+              f"across {tot[4]} source note(s) in {len(paths)} review(s)")
     return 0
 
 
-def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
+def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int, int, int]:
     """Apply the checked items from a single review file into the vault's notes.
-    Returns (applied_links, applied_tags, source_note_count)."""
+    Returns (applied_links, applied_tags, applied_mocs, applied_ideas,
+    source_note_count)."""
     review = parse_review(open(path, encoding="utf-8").read())
-    if not review["links"] and not review["tags"]:
+    if not any(review[k] for k in ("links", "tags", "mocs", "ideas")):
         print(f"no checked items in {path} — nothing to apply")
         if not dry_run:  # explicit apply = retire the review anyway
             archived = _archive_review(path)
             if archived:
                 print(f"archived review → {archived}")
-        return 0, 0, 0
+        return 0, 0, 0, 0, 0
 
     notes = _scan_vault(cfg["vault"], set(cfg["exclude_dirs"]), cfg["max_chars"])
     title_to_rel: dict[str, str] = {}
@@ -1667,6 +1719,13 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
     for s, tg in review["tags"]:
         add_tags[s].extend(tg)
     sources = sorted(set(add_links) | set(add_tags))
+
+    add_mocs: dict[str, list] = collections.defaultdict(list)   # moc -> [(note, section)]
+    add_ideas: dict[str, list] = collections.defaultdict(list)  # idea -> [(note, reason)]
+    for note_t, moc_t, section in review["mocs"]:
+        add_mocs[moc_t].append((note_t, section))
+    for note_t, idea_t, reason in review["ideas"]:
+        add_ideas[idea_t].append((note_t, reason))
 
     conn = connect(cfg["db_path"])
     _ensure_garden_tables(conn)
@@ -1717,16 +1776,78 @@ def _apply_review_file(cfg, path, dry_run) -> tuple[int, int, int]:
         applied_links += len(new_links)
         applied_tags += len(new_tags)
 
+    applied_mocs = applied_ideas = 0
+    date_str = datetime.date.today().isoformat()
+
+    def _edit_target(title, kind, editor):
+        """Apply editor(content) to the note titled `title`; count via return."""
+        rel = title_to_rel.get(title.lower())
+        if not rel:
+            print(f"  ! {kind} target not found, skipping: {title}", file=sys.stderr)
+            return 0
+        full = os.path.join(cfg["vault"], rel)
+        content = open(full, encoding="utf-8").read()
+        updated, count = editor(rel, content)
+        if count and not dry_run and updated != content:
+            with open(full, "w", encoding="utf-8") as fh:
+                fh.write(updated)
+        return count
+
+    for moc_t in sorted(add_mocs):
+        def edit(rel, content, moc_t=moc_t):
+            count = 0
+            for note_t, section in add_mocs[moc_t]:
+                updated = insert_into_section(content, section, f"- [[{note_t}]]")
+                if updated is None:
+                    print(f"  ! section '{section}' not found in {moc_t}; "
+                          f"skipping [[{note_t}]]", file=sys.stderr)
+                    continue
+                if updated != content:
+                    content = updated
+                    count += 1
+                    note_rel = title_to_rel.get(note_t.lower())
+                    if note_rel and not dry_run:
+                        conn.execute("UPDATE suggestions SET status='applied' "
+                                     "WHERE path=? AND kind='moc' AND value=?",
+                                     (note_rel, moc_t))
+                    print(f"  {'~' if dry_run else '✓'} [[{note_t}]] → "
+                          f"[[{moc_t}]] § {section}")
+                else:
+                    print(f"  = already in {moc_t}: [[{note_t}]]")
+            return content, count
+        applied_mocs += _edit_target(moc_t, "MOC", edit)
+
+    for idea_t in sorted(add_ideas):
+        def edit(rel, content, idea_t=idea_t):
+            count = 0
+            for note_t, reason in add_ideas[idea_t]:
+                updated = append_related_note(content, note_t, reason, date_str)
+                if updated != content:
+                    content = updated
+                    count += 1
+                    note_rel = title_to_rel.get(note_t.lower())
+                    if note_rel and not dry_run:
+                        conn.execute("UPDATE suggestions SET status='applied' "
+                                     "WHERE path=? AND kind='idea' AND value=?",
+                                     (note_rel, idea_t))
+                    print(f"  {'~' if dry_run else '✓'} [[{note_t}]] → "
+                          f"[[{idea_t}]] (related note)")
+                else:
+                    print(f"  = already related to {idea_t}: [[{note_t}]]")
+            return content, count
+        applied_ideas += _edit_target(idea_t, "idea", edit)
+
     if not dry_run:
         conn.commit()
     head = "DRY RUN — would apply" if dry_run else "applied"
-    print(f"\n{head}: {applied_links} link(s) · {applied_tags} tag(s) "
+    print(f"\n{head}: {applied_links} link(s) · {applied_tags} tag(s) · "
+          f"{applied_mocs} MOC placement(s) · {applied_ideas} idea link(s) "
           f"across {len(sources)} source note(s)")
     if not dry_run:
         archived = _archive_review(path)
         if archived:
             print(f"archived review → {archived}")
-    return applied_links, applied_tags, len(sources)
+    return applied_links, applied_tags, applied_mocs, applied_ideas, len(sources)
 
 
 # --------------------------------------------------------------------------- #
