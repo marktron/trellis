@@ -26,7 +26,9 @@ each is overridable before implementation.
 | MOC set | **Discovered from the index** via existing `moc_scope` config (default `MOCs/`), never hard-coded. The skill's hard-coded MOC list rotted twice already. |
 | New-MOC candidates | **Out of scope** — `trellis cluster` already detects recurring themes with no covering MOC. The triage report links to it instead of duplicating the logic. |
 | Tag suggestions | **Reuse the garden tag pipeline** (neighbor-tag candidate vocabulary + gen-model pick + `classify_tag_suggestions`), but run it for *every* new note, not only thin ones — new notes rarely have tags yet, and this replaces the skill's `tags-after.txt` vocabulary with the live vault vocabulary trellis already computes. |
-| Scheduling | **Manual command** for now (the skill ran weekly on demand). Wiring into launchd/run-garden.sh can come later. |
+| Shared suggestions ledger | **Triage reads and writes the same `suggestions` table as garden**, adding kinds `moc` and `idea` alongside `link`/`tag`. This is what guarantees cross-command dedup: whichever command surfaces a (path, kind, value) first owns it; the other filters it as seen. Load-bearing for the unified review file below. |
+| Unified review file | **Triage and garden write sections into the same dated review file.** One output dir (existing `gardener_dir` — no new config key, no breaking rename), neutral `# Review — YYYY-MM-DD` title, each command appending its own summary line and sections. **Append-if-pending:** a command finding today's file still in the dir (applied files are archived away, so presence = pending) appends its sections instead of creating a suffixed sibling. `parse_review` is already section-driven, so the merged file needs no parser changes; no-arg `trellis apply` sweeps the shared dir as it does today. |
+| Scheduling | **Chained into the nightly wrapper:** `run-garden.sh` runs `index → triage → garden`. Triage needs the new note's embedding (index first); garden's cold-start link pass then sweeps the same note the same night, so its links land beside its MOC/tag/idea suggestions in one file. A triage failure must not block garden (non-fatal step in the wrapper). Triage exits in milliseconds when there are no new notes. |
 
 ## Pipeline — `trellis triage`
 
@@ -64,19 +66,22 @@ Flags: `--dry-run`, `--force` (ignore triage state, re-triage), `--limit <n>`,
    competitive or philosophical companion for the idea, returning a one-line
    reason or null.
 
-5. **Emit review file** to `triage_dir` (default `_workspace/triage/`, same
-   dated-path + collision guard helpers as the gardener), record each processed
-   note in `triage_state`, set `triage_last_run` to now. `--dry-run` prints and
-   writes nothing (no file, no state), matching `garden`.
+5. **Emit review sections** into the shared dated review file in `gardener_dir`
+   (create it, or append if today's file is pending — see Decisions), record new
+   `moc`/`idea`/`tag` suggestions in the shared `suggestions` ledger, record each
+   processed note in `triage_state`, set `triage_last_run` to now. `--dry-run`
+   prints and writes nothing (no file, no ledger, no state), matching `garden`.
 
 ## Review file format
 
-Extends the existing gardener grammar so `parse_review` stays one parser:
+Extends the existing gardener grammar so `parse_review` stays one parser. In the
+nightly chain, triage typically creates the file and garden appends its Link/Tag
+sections below (garden's title line switches to the neutral form too):
 
 ```markdown
-# Triage review — 2026-07-19
+# Review — 2026-07-19
 
-_5 new note(s) · 9 tag suggestion(s) · 3 MOC placement(s) · 2 idea link(s)._
+_Triage: 5 new note(s) · 9 tag suggestion(s) · 3 MOC placement(s) · 2 idea link(s)._
 
 > Check the boxes you want, then run `trellis apply <this file>`.
 
@@ -119,7 +124,7 @@ bodies are never touched (tags still go through the frontmatter merge path).
 
 ```toml
 triage_scope        = ["z/"]
-triage_dir          = "_workspace/triage"
+# review files share the existing gardener_dir — no separate triage_dir
 idea_scope          = ["Areas/Product Ideas/"]
 triage_bulk_min     = 8      # mtime-minute bucket size ⇒ suspected bulk touch
 triage_tag_skip_threshold = 3
@@ -141,7 +146,11 @@ Following the house pattern — pure helpers, no network, join the fast suite:
   missing-heading skip, idempotency (re-apply doesn't duplicate the link).
 - **Related-notes append**: section creation, prefix-matching legacy headings,
   dedup.
-- **`parse_review`** round-trip for the two new sections; renderer output.
+- **`parse_review`** round-trip for the two new sections, including a merged
+  triage+garden file; renderer output.
+- **Append-if-pending**: append vs. create decision (pending file present /
+  absent / already archived), summary-line accumulation, and that a merged file
+  round-trips through `parse_review` → apply → archive as one unit.
 - **Prompt builders** for MOC placement and idea relevance (string-level).
 - Gen-model calls stay behind `generate_json` (already mocked in existing tests).
 
@@ -152,7 +161,9 @@ Following the house pattern — pure helpers, no network, join the fast suite:
 - No wikilink suggestions between new notes and z/ (that's `garden`; the natural
   cadence is to run `trellis garden` after triage, and new notes are exactly the
   cold-start notes garden's broad pass targets).
-- No scheduler integration yet.
+- No frontmatter *repair* (the skill fixed obviously-broken YAML in passing);
+  trellis only merges tags via the existing frontmatter path. Broken frontmatter
+  stays a manual fix.
 - No migration of `_workspace/triage-log.md` — the dated review files + `applied/`
   archive are the log now.
 
@@ -163,3 +174,11 @@ Following the house pattern — pure helpers, no network, join the fast suite:
 - Whether the gen model reliably names an *existing* section from the heading
   list, or needs the heading list echoed back with IDs to pick from. Decide
   during implementation with a few live probes.
+- **First-run batch size.** The seed import takes `last_run_iso` from the skill's
+  state file, so the first `trellis triage` covers everything since the last
+  skill run — could be weeks of notes. Run it manually with `--limit` (and
+  `--dry-run` first) before enabling the nightly chain.
+- **Local-model judgment quality vs. Claude.** MOC section placement and idea
+  relevance were previously Claude's calls. Eyeball the first real run's review
+  file before trusting the thresholds; the checkbox gate contains the blast
+  radius either way.
