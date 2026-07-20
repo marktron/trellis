@@ -99,8 +99,12 @@ DEFAULTS = {
     "idea_scope": ["Areas/Product Ideas/"],  # where product-idea files live
     "triage_bulk_min": 8,              # mtime-minute bucket >= this ⇒ suspected bulk touch
     "triage_tag_skip_threshold": 3,    # skip tag step when a note already has >= this many
-    "moc_place_threshold": 0.55,       # note↔MOC cosine gate (provisional; tune)
-    "idea_link_threshold": 0.55,       # note↔idea cosine gate (provisional; tune)
+    # Gates are recall filters — the gen model is the precision step. First-run
+    # calibration (qwen3-embedding:0.6b): MOC files embed as link lists, so
+    # note↔MOC sims top out ~0.26 even for true fits; idea true-fits landed
+    # 0.44–0.52 with unrelated ideas ~0.30.
+    "moc_place_threshold": 0.25,       # note↔MOC cosine gate
+    "idea_link_threshold": 0.40,       # note↔idea cosine gate
 }
 
 # qwen3-embedding works best with a task instruction on the QUERY side only.

@@ -81,5 +81,5 @@ triage_scope        = ["z/"]
 idea_scope          = ["Areas/Product Ideas/"]  # product-idea files (must be indexed)
 triage_bulk_min     = 8      # >= this many notes sharing an mtime-minute => bulk touch, excluded
 triage_tag_skip_threshold = 3  # skip tag suggestions when a note already has this many
-moc_place_threshold = 0.55   # note<->MOC cosine gate (provisional; tune after first run)
-idea_link_threshold = 0.55   # note<->idea cosine gate (provisional; tune after first run)
+moc_place_threshold = 0.25   # note<->MOC cosine gate (MOC link-lists embed low; ~0.26 = true fit)
+idea_link_threshold = 0.40   # note<->idea cosine gate (true fits observed 0.44-0.52)
