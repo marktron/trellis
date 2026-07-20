@@ -1280,5 +1280,36 @@ class TestRenderTriageReport(unittest.TestCase):
         self.assertIn('"related"', p2)
 
 
+class TestTriageUnindexedNotes(unittest.TestCase):
+    def test_unindexed_new_note_warns_instead_of_silent_drop(self):
+        import argparse, io, tempfile
+        from contextlib import redirect_stdout, redirect_stderr
+        vault = tempfile.mkdtemp()
+        os.makedirs(os.path.join(vault, "z"))
+        with open(os.path.join(vault, "z", "Fresh note.md"), "w") as fh:
+            fh.write("---\ncreated: 2026-07-19\ntags: []\n---\nbody\n")
+        db = os.path.join(vault, "test.db")
+        conn = t.connect(db)
+        t._ensure_garden_tables(conn)
+        t._ensure_triage_tables(conn)
+        t.meta_set(conn, "triage_last_run", "2026-07-18T00:00:00")
+        # One indexed dummy row so _load_matrix is non-empty; the fresh note
+        # is deliberately NOT in the index.
+        vec = np.ones(4, dtype=np.float32).tobytes()
+        conn.execute("INSERT INTO notes VALUES(?,?,?,?,?,?,?,?)",
+                     ("z/Old note.md", "Old note", "h", 0.0, "m", 4, vec, 0.0))
+        conn.commit()
+        conn.close()
+        cfg = dict(t.DEFAULTS)
+        cfg.update({"vault": vault, "db_path": db})
+        args = argparse.Namespace(dry_run=True, force=False, limit=None, scope=None)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = t.cmd_triage(cfg, args)
+        self.assertEqual(rc, 0)
+        self.assertIn("not yet indexed", err.getvalue())
+        self.assertIn("z/Fresh note.md", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

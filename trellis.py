@@ -2023,6 +2023,12 @@ def cmd_triage(cfg, args):
                for rel, n in notes.items() if rel.startswith(scope)]
     candidates, suspected = detect_new_notes(entries, cutoff, triaged,
                                              cfg["triage_bulk_min"])
+    unindexed = [r for r in candidates if r not in rel_to_idx]
+    if unindexed:
+        print(f"{len(unindexed)} new note(s) not yet indexed — run `trellis "
+              "index` first; skipping them this run:", file=sys.stderr)
+        for r in unindexed:
+            print(f"  - {r}", file=sys.stderr)
     candidates = [r for r in candidates if r in rel_to_idx]
     limited = bool(args.limit) and len(candidates) > args.limit
     if limited:
@@ -2188,9 +2194,9 @@ def cmd_triage(cfg, args):
         return 0
     out_path = append_or_create_review(
         os.path.join(vault, cfg["gardener_dir"]), date_str, report)
-    if not limited:
-        # Advance the cutoff only when nothing was left behind — a --limit run
-        # relies on triage_state alone so the remainder surfaces next time.
+    if not limited and not unindexed:
+        # Advance the cutoff only when nothing was left behind (limit or
+        # not-yet-indexed) — the remainder must resurface on the next run.
         meta_set(conn, "triage_last_run", datetime.datetime.now().isoformat())
     # Single end-of-run commit: state must never land without the review
     # file (interrupted runs roll back wholesale).
