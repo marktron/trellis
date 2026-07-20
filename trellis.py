@@ -2089,7 +2089,9 @@ def cmd_triage(cfg, args):
                     out = generate_json(prompt, gen_model, cfg["ollama_url"],
                                         timeout=cfg["gen_timeout"],
                                         num_predict=cfg["gen_num_predict"])
-                except OllamaError:
+                except OllamaError as e:
+                    print(f"  tag gen failed for {rel}: {str(e)[:120]}",
+                          file=sys.stderr)
                     out = {}
                 picked, _ = classify_tag_suggestions(
                     out.get("tags", []), [], cand_tags, vault_tags, note["tags"])
@@ -2126,7 +2128,9 @@ def cmd_triage(cfg, args):
                         out = generate_json(prompt, gen_model, cfg["ollama_url"],
                                             timeout=cfg["gen_timeout"],
                                             num_predict=cfg["gen_num_predict"])
-                    except OllamaError:
+                    except OllamaError as e:
+                        print(f"  MOC gen failed for {rel}: {str(e)[:120]}",
+                              file=sys.stderr)
                         out = {}
                     section = out.get("section")
                     by_lower = {h.lower(): h for h in headings}
@@ -2162,7 +2166,9 @@ def cmd_triage(cfg, args):
                     out = generate_json(prompt, gen_model, cfg["ollama_url"],
                                         timeout=cfg["gen_timeout"],
                                         num_predict=cfg["gen_num_predict"])
-                except OllamaError:
+                except OllamaError as e:
+                    print(f"  idea gen failed for {rel}: {str(e)[:120]}",
+                          file=sys.stderr)
                     out = {}
                 if out.get("related") is True:
                     reason = " ".join(str(out.get("reason", "")).split()[:10])[:120]
